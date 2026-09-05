@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Белка</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root{
+    --felt-dark:#173324;
+    --felt-light:#1f4632;
+    --gold:#c9a13b;
+    --gold-dim:#8a7233;
+    --card-cream:#f4ecd8;
+    --card-cream-edge:#e2d5b3;
+    --ink:#2a2420;
+    --red:#a33131;
+    --wood:#4a3323;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{
+    margin:0; height:100%; overflow:hidden;
+    background:
+      radial-gradient(ellipse at 50% 40%, var(--felt-light), var(--felt-dark) 75%);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    color:var(--card-cream);
+    user-select:none;
+  }
+  .table{
+    position:relative;
+    width:100%; height:100%;
+    display:flex; flex-direction:column;
+    justify-content:space-between;
+  }
+
+  /* top bar: trump + score */
+  .topbar{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:14px 18px 0;
+  }
+  .trump{
+    display:flex; align-items:center; gap:8px;
+    background:rgba(0,0,0,0.25);
+    border:1px solid var(--gold-dim);
+    border-radius:999px;
+    padding:6px 14px;
+    font-size:14px; letter-spacing:.3px;
+  }
+  .trump .suit{font-size:18px;}
+  .score{
+    display:flex; gap:14px;
+    font-size:13px;
+    background:rgba(0,0,0,0.25);
+    border-radius:999px;
+    padding:6px 16px;
+    border:1px solid rgba(201,161,59,0.3);
+  }
+  .score span.num{color:var(--gold); font-weight:600; margin-left:4px;}
+
+  /* opponents */
+  .opponents{
+    display:flex; justify-content:center; gap:56px;
+    margin-top:6px;
+  }
+  .opp-hand{ display:flex; }
+  .back-card{
+    width:34px; height:48px;
+    margin-left:-16px;
+    border-radius:5px;
+    background:
+      repeating-linear-gradient(135deg, var(--gold-dim) 0 3px, #6e5620 3px 6px);
+    border:1px solid var(--gold-dim);
+    box-shadow:0 2px 4px rgba(0,0,0,.4);
+  }
+  .back-card:first-child{margin-left:0;}
+  .opp-label{
+    text-align:center; font-size:11px; color:var(--gold);
+    margin-top:4px; opacity:.85;
+  }
+
+  /* trick area (center) */
+  .trick{
+    flex:1;
+    display:flex; align-items:center; justify-content:center;
+    gap:10px;
+    position:relative;
+  }
+  .trick .placeholder{
+    font-size:12px; color:rgba(244,236,216,0.35);
+    letter-spacing:.5px;
+  }
+
+  /* player's hand */
+  .handzone{
+    position:relative;
+    height:158px;
+    display:flex; justify-content:center;
+    padding-bottom:14px;
+  }
+  .hand{
+    position:relative;
+    width:100%; max-width:480px;
+    height:100%;
+  }
+  .card{
+    position:absolute;
+    bottom:0; left:50%;
+    width:58px; height:84px;
+    background:var(--card-cream);
+    border:1px solid var(--card-cream-edge);
+    border-radius:8px;
+    box-shadow:0 3px 6px rgba(0,0,0,.5);
+    transform-origin:bottom center;
+    display:flex; flex-direction:column; justify-content:space-between;
+    padding:6px 6px;
+    transition:transform .18s ease, box-shadow .18s ease, margin-bottom .18s ease;
+    cursor:pointer;
+  }
+  .card .rank{ font-size:16px; font-weight:700; line-height:1; color:var(--ink); }
+  .card .suit-big{
+    align-self:center; font-size:22px; margin-top:-4px;
+  }
+  .card .rank.bottom{ align-self:flex-end; transform:rotate(180deg); }
+  .card.red .rank, .card.red .suit-big{ color:var(--red); }
+  .card.trump-card{
+    border:1.5px solid var(--gold);
+    box-shadow:0 3px 8px rgba(201,161,59,.45), 0 3px 6px rgba(0,0,0,.5);
+  }
+  .card.selected{
+    margin-bottom:26px;
+    box-shadow:0 8px 14px rgba(0,0,0,.55);
+  }
+
+  .hint{
+    text-align:center;
+    font-size:11px;
+    color:rgba(244,236,216,0.4);
+    padding-bottom:8px;
+    letter-spacing:.3px;
+  }
+</style>
+</head>
+<body>
+
+<div class="table">
+
+  <div class="topbar">
+    <div class="trump"><span class="suit" id="trumpSuitIcon">♦</span><span id="trumpLabel">Козырь: бубны</span></div>
+    <div class="score">Мы<span class="num" id="scoreUs">0</span> · Они<span class="num" id="scoreThem">0</span></div>
+  </div>
+
+  <div class="opponents">
+    <div>
+      <div class="opp-hand" id="oppLeft"></div>
+      <div class="opp-label">Айдос</div>
+    </div>
+    <div>
+      <div class="opp-hand" id="oppTop"></div>
+      <div class="opp-label">Динара</div>
+    </div>
+    <div>
+      <div class="opp-hand" id="oppRight"></div>
+      <div class="opp-label">Ержан</div>
+    </div>
+  </div>
+
+  <div class="trick" id="trick">
+    <span class="placeholder">ходов пока нет</span>
+  </div>
+
+  <div class="handzone">
+    <div class="hand" id="hand"></div>
+  </div>
+  <div class="hint">Нажми на карту, чтобы выбрать её для хода</div>
+
+</div>
+
+<script>
+  const tg = window.Telegram && window.Telegram.WebApp;
+  if (tg) { tg.ready(); tg.expand(); }
+
+  // ---- demo hand (8 cards, 36-card deck: 6,7,8,9,10,J,Q,K,A) ----
+  const SUITS = {
+    '♠':{color:'black'}, '♣':{color:'black'},
+    '♦':{color:'red'},   '♥':{color:'red'}
+  };
+  const TRUMP_SUIT = '♦'; // will come from server later
+
+  const demoHand = [
+    {rank:'J', suit:'♣'}, {rank:'9', suit:'♠'}, {rank:'A', suit:'♦'},
+    {rank:'K', suit:'♥'}, {rank:'10', suit:'♦'}, {rank:'Q', suit:'♠'},
+    {rank:'J', suit:'♦'}, {rank:'8', suit:'♥'}
+  ];
+
+  function renderOpponentBacks(el, count){
+    el.innerHTML = '';
+    for(let i=0;i<count;i++){
+      const d = document.createElement('div');
+      d.className = 'back-card';
+      el.appendChild(d);
+    }
+  }
+  renderOpponentBacks(document.getElementById('oppLeft'), 8);
+  renderOpponentBacks(document.getElementById('oppTop'), 8);
+  renderOpponentBacks(document.getElementById('oppRight'), 8);
+
+  document.getElementById('trumpSuitIcon').textContent = TRUMP_SUIT;
+
+  const CARD_W = 58;
+
+  function cardTransform(dx, angle, lifted){
+    const lift = lifted ? -30 : 0;
+    return `translateX(-50%) translateX(${dx}px) rotate(${angle}deg) translateY(${lift}px)`;
+  }
+
+  function renderHand(cards){
+    const hand = document.getElementById('hand');
+    hand.innerHTML = '';
+    const n = cards.length;
+    if (n === 0) return;
+
+    // horizontal offset guarantees every card's rank corner stays visible,
+    // regardless of rotation — spacing is never left to overlap chance.
+    const containerWidth = hand.clientWidth || 340;
+    const maxUsableWidth = containerWidth - 12;
+    // try to lay cards out almost edge-to-edge with only a small overlap;
+    // if they don't fit at all, shrink the overlap further (never below a bare sliver)
+    const idealOffset = CARD_W - 6;
+    const fitOffset = n > 1 ? (maxUsableWidth - CARD_W) / (n - 1) : 0;
+    const offset = n > 1 ? Math.min(idealOffset, fitOffset) : 0;
+
+    // rotation is purely cosmetic (fan tilt) — kept minimal so it never eats into visibility
+    const maxTotalAngle = Math.min(14, n * 1.6);
+    const angleStep = n > 1 ? maxTotalAngle / (n - 1) : 0;
+
+    cards.forEach((c, i) => {
+      const dx = (i - (n - 1) / 2) * offset;
+      const angle = (i - (n - 1) / 2) * angleStep;
+      const el = document.createElement('div');
+      const isRed = SUITS[c.suit].color === 'red';
+      const isTrump = c.suit === TRUMP_SUIT || c.rank === 'J';
+      el.className = 'card' + (isRed ? ' red' : '') + (isTrump ? ' trump-card' : '');
+      el.style.transform = cardTransform(dx, angle, false);
+      el.style.zIndex = i;
+      el.innerHTML = `
+        <div class="rank">${c.rank}<br>${c.suit}</div>
+        <div class="suit-big">${c.suit}</div>
+        <div class="rank bottom">${c.rank}<br>${c.suit}</div>
+      `;
+      el.addEventListener('click', () => {
+        const wasSelected = el.classList.contains('selected');
+        hand.querySelectorAll('.card.selected').forEach(x => {
+          x.classList.remove('selected');
+          x.style.transform = cardTransform(parseFloat(x.dataset.dx), parseFloat(x.dataset.angle), false);
+        });
+        if (!wasSelected) {
+          el.classList.add('selected');
+          el.style.transform = cardTransform(dx, angle, true);
+          hand.appendChild(el); // bring to front while selected
+        }
+      });
+      el.dataset.dx = dx;
+      el.dataset.angle = angle;
+      hand.appendChild(el);
+    });
+  }
+
+  renderHand(demoHand);
+  window.addEventListener('resize', () => renderHand(demoHand));
+</script>
+
+</body>
+</html>
