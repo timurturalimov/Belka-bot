@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Белка</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-database-compat.js"></script>
 <style>
   :root{
     --felt-dark:#173324;
@@ -138,9 +140,26 @@
     padding-bottom:8px;
     letter-spacing:.3px;
   }
+
+  .waiting{
+    position:fixed; inset:0;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:14px;
+    background:radial-gradient(ellipse at 50% 40%, var(--felt-light), var(--felt-dark) 75%);
+    z-index:50;
+  }
+  .waiting .dots{ font-size:15px; letter-spacing:.4px; color:var(--card-cream); }
+  .waiting .count{ font-size:34px; font-weight:700; color:var(--gold); }
+  .waiting .sub{ font-size:12px; color:rgba(244,236,216,0.5); }
 </style>
 </head>
 <body>
+
+<div class="waiting" id="waiting">
+  <div class="count" id="waitingCount">1 / 4</div>
+  <div class="dots">Ожидаем игроков за столом…</div>
+  <div class="sub" id="waitingSub"></div>
+</div>
 
 <div class="table">
 
@@ -179,18 +198,123 @@
   const tg = window.Telegram && window.Telegram.WebApp;
   if (tg) { tg.ready(); tg.expand(); }
 
-  // ---- demo hand (8 cards, 36-card deck: 6,7,8,9,10,J,Q,K,A) ----
   const SUITS = {
     '♠':{color:'black'}, '♣':{color:'black'},
     '♦':{color:'red'},   '♥':{color:'red'}
   };
-  const TRUMP_SUIT = '♦'; // will come from server later
+  let TRUMP_SUIT = '♦'; // overwritten once the real deal comes from Firebase
 
-  const demoHand = [
-    {rank:'J', suit:'♣'}, {rank:'9', suit:'♠'}, {rank:'A', suit:'♦'},
-    {rank:'K', suit:'♥'}, {rank:'10', suit:'♦'}, {rank:'Q', suit:'♠'},
-    {rank:'J', suit:'♦'}, {rank:'8', suit:'♥'}
-  ];
+  // ---------------- Firebase ----------------
+  const firebaseConfig = {
+    apiKey: "AIzaSyC0vQ0YTBEj2-SeS5Iz0FnDCDTtDWsXMNY",
+    authDomain: "belka-game-4a0fd.firebaseapp.com",
+    databaseURL: "https://belka-game-4a0fd-default-rtdb.europe-west1.firebasedatabase.app",
+    projectId: "belka-game-4a0fd",
+    storageBucket: "belka-game-4a0fd.firebasestorage.app",
+    messagingSenderId: "976969560919",
+    appId: "1:976969560919:web:df825947854a329d954412"
+  };
+  firebase.initializeApp(firebaseConfig);
+  const db = firebase.database();
+
+  // one shared table for now — later this becomes one room per match
+  const ROOM_ID = 'main';
+  const roomRef = db.ref('rooms/' + ROOM_ID);
+
+  const tgUser = tg && tg.initDataUnsafe && tg.initDataUnsafe.user;
+  const myId = tgUser ? String(tgUser.id) : (sessionStorage.getItem('guestId') || (() => {
+    const id = 'guest_' + Math.random().toString(36).slice(2, 9);
+    sessionStorage.setItem('guestId', id);
+    return id;
+  })());
+  const myName = tgUser ? (tgUser.first_name || 'Игрок') : 'Гость';
+
+  let mySeat = null;
+
+  const RANKS = ['6','7','8','9','10','J','Q','K','A'];
+  const SUIT_LIST = ['♠','♣','♦','♥'];
+
+  function buildShuffledDeck(){
+    const deck = [];
+    for (const s of SUIT_LIST) for (const r of RANKS) deck.push({rank:r, suit:s});
+    for (let i = deck.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [deck[i], deck[j]] = [deck[j], deck[i]];
+    }
+    return deck;
+  }
+
+  function dealAndWriteHands(){
+    const deck = buildShuffledDeck();
+    const hands = [[], [], [], []];
+    for (let seat = 0; seat < 4; seat++) {
+      hands[seat] = deck.slice(seat * 8, seat * 8 + 8);
+    }
+    const trumpSuit = SUIT_LIST[Math.floor(Math.random() * SUIT_LIST.length)];
+    roomRef.update({
+      hands: hands,
+      trumpSuit: trumpSuit,
+      status: 'dealt'
+    });
+  }
+
+  // join: grab the first free seat (0-3), transactionally so two players never collide
+  roomRef.child('players').transaction(players => {
+    players = players || {};
+    for (const seat in players) {
+      if (players[seat] && players[seat].id === myId) return players; // already seated
+    }
+    for (let seat = 0; seat < 4; seat++) {
+      if (!players[seat]) {
+        players[seat] = { id: myId, name: myName };
+        return players;
+      }
+    }
+    return players; // table full, leave untouched
+  }, (error, committed, snapshot) => {
+    if (error) { console.error('join failed', error); return; }
+    const players = snapshot.val() || {};
+    for (const seat in players) {
+      if (players[seat] && players[seat].id === myId) mySeat = Number(seat);
+    }
+    if (mySeat === null) {
+      document.getElementById('waitingSub').textContent = 'Стол уже заполнен — попробуй позже.';
+      return;
+    }
+    attachRoomListeners();
+  });
+
+  function attachRoomListeners(){
+    roomRef.on('value', snap => {
+      const room = snap.val() || {};
+      const players = room.players || {};
+      const seatsFilled = Object.keys(players).length;
+
+      document.getElementById('waitingCount').textContent = seatsFilled + ' / 4';
+
+      // opponent names, in seat order relative to me
+      const order = [1, 2, 3].map(offset => (mySeat + offset) % 4);
+      const labelIds = ['oppLeft', 'oppTop', 'oppRight'];
+      order.forEach((seat, i) => {
+        const p = players[seat];
+        const labelEl = document.querySelector('#' + labelIds[i]).parentElement.querySelector('.opp-label');
+        labelEl.textContent = p ? p.name : 'Ожидание…';
+        renderOpponentBacks(document.getElementById(labelIds[i]), p ? 8 : 0);
+      });
+
+      if (room.status === 'dealt' && room.hands && room.hands[mySeat]) {
+        document.getElementById('waiting').style.display = 'none';
+        TRUMP_SUIT = room.trumpSuit;
+        document.getElementById('trumpSuitIcon').textContent = TRUMP_SUIT;
+        const trumpNames = {'♠':'пики', '♣':'трефы', '♦':'бубны', '♥':'червы'};
+        document.getElementById('trumpLabel').textContent = 'Козырь: ' + trumpNames[TRUMP_SUIT];
+        renderHand(room.hands[mySeat]);
+      } else if (seatsFilled === 4 && mySeat === 0 && room.status !== 'dealt') {
+        // I'm the first seat — I deal once everyone is seated
+        dealAndWriteHands();
+      }
+    });
+  }
 
   function renderOpponentBacks(el, count){
     el.innerHTML = '';
@@ -200,11 +324,6 @@
       el.appendChild(d);
     }
   }
-  renderOpponentBacks(document.getElementById('oppLeft'), 8);
-  renderOpponentBacks(document.getElementById('oppTop'), 8);
-  renderOpponentBacks(document.getElementById('oppRight'), 8);
-
-  document.getElementById('trumpSuitIcon').textContent = TRUMP_SUIT;
 
   const CARD_W = 58;
 
@@ -265,8 +384,10 @@
     });
   }
 
-  renderHand(demoHand);
-  window.addEventListener('resize', () => renderHand(demoHand));
+  let lastRenderedHand = [];
+  const _renderHand = renderHand;
+  renderHand = function(cards){ lastRenderedHand = cards; _renderHand(cards); };
+  window.addEventListener('resize', () => { if (lastRenderedHand.length) _renderHand(lastRenderedHand); });
 </script>
 
 </body>
