@@ -151,14 +151,88 @@
   .waiting .dots{ font-size:15px; letter-spacing:.4px; color:var(--card-cream); }
   .waiting .count{ font-size:34px; font-weight:700; color:var(--gold); }
   .waiting .sub{ font-size:12px; color:rgba(244,236,216,0.5); }
+
+  .menu-btn{
+    font-family:inherit;
+    font-size:15px;
+    color:var(--card-cream);
+    background:rgba(0,0,0,0.28);
+    border:1px solid var(--gold-dim);
+    border-radius:12px;
+    padding:14px 28px;
+    width:240px;
+    cursor:pointer;
+  }
+  .menu-btn:active{ background:rgba(0,0,0,0.45); }
+  .code-input{
+    font-family:inherit;
+    font-size:22px;
+    letter-spacing:4px;
+    text-align:center;
+    text-transform:uppercase;
+    width:160px;
+    padding:10px 0;
+    border-radius:10px;
+    border:1px solid var(--gold-dim);
+    background:rgba(0,0,0,0.28);
+    color:var(--card-cream);
+  }
+  .code-input::placeholder{ color:rgba(244,236,216,0.35); letter-spacing:2px; }
+  .room-code{
+    font-size:14px; color:var(--card-cream);
+    background:rgba(0,0,0,0.28);
+    border:1px solid var(--gold-dim);
+    border-radius:10px;
+    padding:8px 16px;
+  }
+  .room-code span{ color:var(--gold); font-weight:700; letter-spacing:3px; }
+  .back-btn{ align-self:flex-start; margin-bottom:10px; padding:8px 16px; font-size:13px; width:auto; }
+  .room-item{
+    display:flex; justify-content:space-between; align-items:center;
+    background:rgba(0,0,0,0.28);
+    border:1px solid var(--gold-dim);
+    border-radius:10px;
+    padding:12px 16px;
+    cursor:pointer;
+  }
+  .room-item .creator{ font-size:14px; }
+  .room-item .count{ font-size:13px; color:var(--gold); font-weight:600; }
 </style>
 </head>
 <body>
 
-<div class="waiting" id="waiting">
+<div class="waiting" id="menu">
+  <div class="dots" style="font-size:20px; font-weight:700; color:var(--gold); margin-bottom:6px;">Белка</div>
+  <button class="menu-btn" id="btnRandom">Играть со случайными</button>
+  <button class="menu-btn" id="btnCreateRoom">Создать комнату</button>
+  <button class="menu-btn" id="btnBrowseRooms">Присоединиться к комнате</button>
+  <button class="menu-btn" id="btnGoPrivate">Приватная комната</button>
+</div>
+
+<div class="waiting" id="privateScreen" style="display:none;">
+  <button class="menu-btn back-btn" id="btnBackFromPrivate">‹ Назад</button>
+  <div class="dots" style="font-size:16px;">Приватная комната</div>
+  <button class="menu-btn" id="btnCreatePrivate">Создать приватную</button>
+  <div style="display:flex; flex-direction:column; align-items:center; gap:10px; margin-top:4px;">
+    <input id="codeInput" maxlength="5" placeholder="КОД" class="code-input">
+    <button class="menu-btn" id="btnJoinPrivate">Войти по коду</button>
+  </div>
+</div>
+
+<div class="waiting" id="roomListScreen" style="display:none;">
+  <button class="menu-btn back-btn" id="btnBackFromList">‹ Назад</button>
+  <div class="dots" style="font-size:16px;">Открытые комнаты</div>
+  <div id="roomListItems" style="display:flex; flex-direction:column; gap:10px; width:260px; max-height:50vh; overflow-y:auto;"></div>
+  <div class="sub" id="roomListEmpty">Пока никто не создал комнату</div>
+</div>
+
+<div class="waiting" id="waiting" style="display:none;">
   <div class="count" id="waitingCount">1 / 4</div>
-  <div class="dots">Ожидаем игроков за столом…</div>
+  <div class="dots" id="waitingLabel">Ожидаем игроков за столом…</div>
   <div class="sub" id="waitingSub"></div>
+  <div class="room-code" id="roomCodeBox" style="display:none;">
+    Код комнаты: <span id="roomCodeText"></span>
+  </div>
 </div>
 
 <div class="table">
@@ -217,10 +291,6 @@
   firebase.initializeApp(firebaseConfig);
   const db = firebase.database();
 
-  // one shared table for now — later this becomes one room per match
-  const ROOM_ID = 'main';
-  const roomRef = db.ref('rooms/' + ROOM_ID);
-
   const tgUser = tg && tg.initDataUnsafe && tg.initDataUnsafe.user;
   const myId = tgUser ? String(tgUser.id) : (sessionStorage.getItem('guestId') || (() => {
     const id = 'guest_' + Math.random().toString(36).slice(2, 9);
@@ -230,6 +300,7 @@
   const myName = tgUser ? (tgUser.first_name || 'Игрок') : 'Гость';
 
   let mySeat = null;
+  let roomRef = null;
 
   const RANKS = ['6','7','8','9','10','J','Q','K','A'];
   const SUIT_LIST = ['♠','♣','♦','♥'];
@@ -256,32 +327,178 @@
       trumpSuit: trumpSuit,
       status: 'dealt'
     });
+    // if this was a listed open room, it's full now — take it off the public list
+    db.ref('public_rooms/' + roomRef.key).remove();
   }
 
-  // join: grab the first free seat (0-3), transactionally so two players never collide
-  roomRef.child('players').transaction(players => {
-    players = players || {};
-    for (const seat in players) {
-      if (players[seat] && players[seat].id === myId) return players; // already seated
-    }
-    for (let seat = 0; seat < 4; seat++) {
-      if (!players[seat]) {
-        players[seat] = { id: myId, name: myName };
-        return players;
+  // ---------------- Matchmaking: group waiting players into fresh rooms of 4 ----------------
+  function tryMatchmake(){
+    db.ref('lobby/lock').transaction(locked => locked ? undefined : true, (error, committed) => {
+      if (error || !committed) return; // someone else already matchmaking
+      db.ref('lobby/queue').once('value').then(qSnap => {
+        const queue = qSnap.val() || {};
+        const entries = Object.keys(queue).map(id => ({ id, ...queue[id] }));
+        entries.sort((a, b) => (a.joinedAt || 0) - (b.joinedAt || 0));
+        if (entries.length >= 4) {
+          const chosen = entries.slice(0, 4);
+          const newRoomKey = db.ref('rooms').push().key;
+          const players = {};
+          chosen.forEach((p, seat) => { players[seat] = { id: p.id, name: p.name }; });
+          const updates = {};
+          updates['rooms/' + newRoomKey + '/players'] = players;
+          chosen.forEach(p => {
+            updates['lobby/queue/' + p.id] = null;
+            updates['lobby/assignments/' + p.id] = newRoomKey;
+          });
+          return db.ref().update(updates);
+        }
+      }).finally(() => db.ref('lobby/lock').set(false));
+    });
+  }
+
+  function showScreen(id){
+    ['menu', 'privateScreen', 'roomListScreen', 'waiting'].forEach(s => {
+      document.getElementById(s).style.display = (s === id) ? 'flex' : 'none';
+    });
+  }
+
+  function generateRoomCode(){
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    let code = '';
+    for (let i = 0; i < 5; i++) code += chars[Math.floor(Math.random() * chars.length)];
+    return code;
+  }
+
+  // ---------------- Random matchmaking ----------------
+  document.getElementById('btnRandom').addEventListener('click', () => {
+    document.getElementById('waitingLabel').textContent = 'Ожидаем игроков за столом…';
+    showScreen('waiting');
+    db.ref('lobby/queue/' + myId).set({ name: myName, joinedAt: firebase.database.ServerValue.TIMESTAMP });
+    db.ref('lobby/queue').on('value', snap => {
+      const queue = snap.val() || {};
+      if (!roomRef) {
+        document.getElementById('waitingCount').textContent = Math.min(Object.keys(queue).length, 4) + ' / 4';
       }
-    }
-    return players; // table full, leave untouched
-  }, (error, committed, snapshot) => {
-    if (error) { console.error('join failed', error); return; }
-    const players = snapshot.val() || {};
-    for (const seat in players) {
-      if (players[seat] && players[seat].id === myId) mySeat = Number(seat);
-    }
-    if (mySeat === null) {
-      document.getElementById('waitingSub').textContent = 'Стол уже заполнен — попробуй позже.';
-      return;
-    }
-    attachRoomListeners();
+      tryMatchmake();
+    });
+    db.ref('lobby/assignments/' + myId).on('value', snap => {
+      const roomId = snap.val();
+      if (roomId && !roomRef) {
+        roomRef = db.ref('rooms/' + roomId);
+        joinAssignedRoom();
+      }
+    });
+  });
+
+  // player already has an exact seat (assigned by matchmaking) — just read it
+  function joinAssignedRoom(){
+    roomRef.child('players').once('value').then(playersSnap => {
+      const players = playersSnap.val() || {};
+      for (const seat in players) {
+        if (players[seat] && players[seat].id === myId) mySeat = Number(seat);
+      }
+      attachRoomListeners();
+    });
+  }
+
+  // create/join by seat directly: used for public "Создать комнату" and for private rooms
+  function joinRoomBySeat(){
+    roomRef.child('players').transaction(players => {
+      players = players || {};
+      for (const seat in players) {
+        if (players[seat] && players[seat].id === myId) return players; // already seated
+      }
+      for (let seat = 0; seat < 4; seat++) {
+        if (!players[seat]) { players[seat] = { id: myId, name: myName }; return players; }
+      }
+      return players; // room full
+    }, (error, committed, snapshot) => {
+      if (error) { console.error('join failed', error); return; }
+      const players = snapshot.val() || {};
+      for (const seat in players) {
+        if (players[seat] && players[seat].id === myId) mySeat = Number(seat);
+      }
+      if (mySeat === null) {
+        document.getElementById('waitingSub').textContent = 'Комната уже заполнена (максимум 4 игрока).';
+        return;
+      }
+      attachRoomListeners();
+    });
+  }
+
+  // ---------------- Открытая комната (виден создатель, любой может присоединиться) ----------------
+  document.getElementById('btnCreateRoom').addEventListener('click', () => {
+    const roomKey = db.ref('rooms').push().key;
+    roomRef = db.ref('rooms/' + roomKey);
+    db.ref('public_rooms/' + roomKey).set({ creatorName: myName, createdAt: firebase.database.ServerValue.TIMESTAMP });
+    document.getElementById('waitingLabel').textContent = 'Комната создана — ждём игроков';
+    document.getElementById('waitingSub').textContent = 'Другие увидят её в списке открытых комнат';
+    document.getElementById('roomCodeBox').style.display = 'none';
+    showScreen('waiting');
+    joinRoomBySeat();
+  });
+
+  document.getElementById('btnBackFromList').addEventListener('click', () => {
+    db.ref('public_rooms').off('value');
+    showScreen('menu');
+  });
+
+  document.getElementById('btnBrowseRooms').addEventListener('click', () => {
+    showScreen('roomListScreen');
+    db.ref('public_rooms').on('value', snap => {
+      const rooms = snap.val() || {};
+      const listEl = document.getElementById('roomListItems');
+      const emptyEl = document.getElementById('roomListEmpty');
+      const ids = Object.keys(rooms);
+      listEl.innerHTML = '';
+      emptyEl.style.display = ids.length ? 'none' : 'block';
+      ids.forEach(roomId => {
+        const item = document.createElement('div');
+        item.className = 'room-item';
+        item.innerHTML = `<span class="creator">Комната ${rooms[roomId].creatorName}</span><span class="count" id="count_${roomId}">…</span>`;
+        item.addEventListener('click', () => {
+          db.ref('public_rooms').off('value');
+          roomRef = db.ref('rooms/' + roomId);
+          document.getElementById('waitingLabel').textContent = 'Ожидаем игроков за столом…';
+          document.getElementById('waitingSub').textContent = '';
+          document.getElementById('roomCodeBox').style.display = 'none';
+          showScreen('waiting');
+          joinRoomBySeat();
+        });
+        listEl.appendChild(item);
+        db.ref('rooms/' + roomId + '/players').on('value', pSnap => {
+          const count = Object.keys(pSnap.val() || {}).length;
+          const countEl = document.getElementById('count_' + roomId);
+          if (countEl) countEl.textContent = count + ' / 4';
+        });
+      });
+    });
+  });
+
+  // ---------------- Приватная комната (по коду, не видна в общем списке) ----------------
+  document.getElementById('btnGoPrivate').addEventListener('click', () => showScreen('privateScreen'));
+  document.getElementById('btnBackFromPrivate').addEventListener('click', () => showScreen('menu'));
+
+  document.getElementById('btnCreatePrivate').addEventListener('click', () => {
+    const code = generateRoomCode();
+    roomRef = db.ref('rooms/priv_' + code);
+    document.getElementById('waitingLabel').textContent = 'Ожидаем игроков за столом…';
+    document.getElementById('roomCodeBox').style.display = 'block';
+    document.getElementById('roomCodeText').textContent = code;
+    document.getElementById('waitingSub').textContent = 'Отправь этот код друзьям';
+    showScreen('waiting');
+    joinRoomBySeat();
+  });
+
+  document.getElementById('btnJoinPrivate').addEventListener('click', () => {
+    const code = document.getElementById('codeInput').value.trim().toUpperCase();
+    if (code.length < 4) return;
+    roomRef = db.ref('rooms/priv_' + code);
+    document.getElementById('waitingLabel').textContent = 'Ожидаем игроков за столом…';
+    document.getElementById('roomCodeBox').style.display = 'none';
+    document.getElementById('waitingSub').textContent = '';
+    showScreen('waiting');
+    joinRoomBySeat();
   });
 
   function attachRoomListeners(){
