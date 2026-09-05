@@ -418,6 +418,10 @@
       for (const seat in players) {
         if (players[seat] && players[seat].id === myId) mySeat = Number(seat);
       }
+      if (mySeat !== null) {
+        // free the seat automatically if this player closes the app before the deal happens
+        roomRef.child('players/' + mySeat).onDisconnect().remove();
+      }
       if (mySeat === null) {
         document.getElementById('waitingSub').textContent = 'Комната уже заполнена (максимум 4 игрока).';
         return;
@@ -430,7 +434,9 @@
   document.getElementById('btnCreateRoom').addEventListener('click', () => {
     const roomKey = db.ref('rooms').push().key;
     roomRef = db.ref('rooms/' + roomKey);
-    db.ref('public_rooms/' + roomKey).set({ creatorName: myName, createdAt: firebase.database.ServerValue.TIMESTAMP });
+    const publicRoomRef = db.ref('public_rooms/' + roomKey);
+    publicRoomRef.set({ creatorName: myName, createdAt: firebase.database.ServerValue.TIMESTAMP });
+    publicRoomRef.onDisconnect().remove(); // if the creator closes the app before the room fills, don't leave a ghost listing
     document.getElementById('waitingLabel').textContent = 'Комната создана — ждём игроков';
     document.getElementById('waitingSub').textContent = 'Другие увидят её в списке открытых комнат';
     document.getElementById('roomCodeBox').style.display = 'none';
@@ -521,6 +527,7 @@
 
       if (room.status === 'dealt' && room.hands && room.hands[mySeat]) {
         document.getElementById('waiting').style.display = 'none';
+        roomRef.child('players/' + mySeat).onDisconnect().cancel(); // game started — no longer free my seat if I disconnect
         TRUMP_SUIT = room.trumpSuit;
         document.getElementById('trumpSuitIcon').textContent = TRUMP_SUIT;
         const trumpNames = {'♠':'пики', '♣':'трефы', '♦':'бубны', '♥':'червы'};
