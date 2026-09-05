@@ -204,6 +204,7 @@
 <div class="waiting" id="menu">
   <div class="dots" style="font-size:20px; font-weight:700; color:var(--gold); margin-bottom:6px;">Белка</div>
   <button class="menu-btn" id="btnRandom">Играть со случайными</button>
+  <button class="menu-btn" id="btnSolo">Играть с ботами</button>
   <button class="menu-btn" id="btnCreateRoom">Создать комнату</button>
   <button class="menu-btn" id="btnBrowseRooms">Присоединиться к комнате</button>
   <button class="menu-btn" id="btnGoPrivate">Приватная комната</button>
@@ -429,6 +430,24 @@
       attachRoomListeners();
     });
   }
+
+  // ---------------- Соло с ботами (для теста без других игроков) ----------------
+  document.getElementById('btnSolo').addEventListener('click', () => {
+    const roomKey = db.ref('rooms').push().key;
+    roomRef = db.ref('rooms/' + roomKey);
+    mySeat = 0;
+    const players = {
+      0: { id: myId, name: myName },
+      1: { id: 'bot_1', name: 'Бот Айдос', bot: true },
+      2: { id: 'bot_2', name: 'Бот Динара', bot: true },
+      3: { id: 'bot_3', name: 'Бот Ержан', bot: true }
+    };
+    document.getElementById('waitingLabel').textContent = 'Сажаем ботов за стол…';
+    document.getElementById('waitingSub').textContent = '';
+    document.getElementById('roomCodeBox').style.display = 'none';
+    showScreen('waiting');
+    roomRef.child('players').set(players).then(attachRoomListeners);
+  });
 
   // ---------------- Открытая комната (виден создатель, любой может присоединиться) ----------------
   document.getElementById('btnCreateRoom').addEventListener('click', () => {
