@@ -691,16 +691,21 @@
 
   function hasSuit(hand, suit){ return hand.some(c => c.suit === suit && c.rank !== 'J'); }
 
-  function canPlay(hand, card, ledSuit){
-    if (!ledSuit) return true;
-    if (card.rank === 'J') return true; // jacks are trump, not bound by the led suit
-    if (!hasSuit(hand, ledSuit)) return true;
-    return card.suit === ledSuit;
+  function canPlay(hand, card, ledSuit, trumpSuit, ledSuitsPlayed){
+    if (!ledSuit) return true; // leading — anything goes, including leading an Ace
+    if (hasSuit(hand, ledSuit)) {
+      return card.suit === ledSuit && card.rank !== 'J'; // must follow suit with a plain card — trump/jacks can't substitute if you can follow
+    }
+    // void of the led suit — free to trump...
+    if (card.rank === 'J' || card.suit === trumpSuit) return true;
+    // ...but discarding the Ace of a suit that has never been led this deal isn't allowed
+    if (card.rank === 'A' && !ledSuitsPlayed.has(card.suit)) return false;
+    return true;
   }
 
   function isCardLegal(card){
     if (!gameState) return true;
-    return canPlay(gameState.hands[mySeat], card, gameState.ledSuit);
+    return canPlay(gameState.hands[mySeat], card, gameState.ledSuit, gameState.trumpSuit, gameState.ledSuitsPlayed);
   }
 
   function partnerSeat(seat){ return (seat + 2) % 4; }
@@ -711,6 +716,7 @@
       hands: JSON.parse(JSON.stringify(room.hands)),
       trumpSuit: room.trumpSuit,
       ledSuit: null,
+      ledSuitsPlayed: new Set(),
       trick: [],
       leader: (mySeat + 1) % 4,
       turn: null,
@@ -732,7 +738,7 @@
 
   function botPlay(){
     const seat = gameState.turn;
-    const options = gameState.hands[seat].filter(c => canPlay(gameState.hands[seat], c, gameState.ledSuit));
+    const options = gameState.hands[seat].filter(c => canPlay(gameState.hands[seat], c, gameState.ledSuit, gameState.trumpSuit, gameState.ledSuitsPlayed));
     const card = options[Math.floor(Math.random() * options.length)];
     playCard(seat, card);
   }
@@ -743,6 +749,7 @@
     hand.splice(idx, 1);
     if (gameState.trick.length === 0) {
       gameState.ledSuit = (card.rank === 'J') ? null : card.suit;
+      if (card.rank !== 'J') gameState.ledSuitsPlayed.add(card.suit);
     }
     gameState.trick.push({ seat, card });
     renderTrickArea();
