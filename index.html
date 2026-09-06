@@ -120,7 +120,7 @@
   }
   .card .rank{ font-size:16px; font-weight:700; line-height:1; color:var(--ink); }
   .card .suit-big{
-    align-self:center; font-size:22px; margin-top:-4px;
+    align-self:center; font-size:22px; margin-top:-4px; color:var(--ink);
   }
   .card .rank.bottom{ align-self:flex-end; transform:rotate(180deg); }
   .card.red .rank, .card.red .suit-big{ color:var(--red); }
@@ -212,7 +212,7 @@
     font-weight:700;
   }
   .trick-card .rank{ font-size:14px; color:var(--ink); }
-  .trick-card .suit-big{ font-size:16px; }
+  .trick-card .suit-big{ font-size:16px; color:var(--ink); }
   .trick-card.red .rank, .trick-card.red .suit-big{ color:var(--red); }
   .trick-bottom{ transform:translateY(38px); }
   .trick-top{ transform:translateY(-38px); }
@@ -330,7 +330,7 @@
   let mySeat = null;
   let roomRef = null;
 
-  const RANKS = ['6','7','8','9','10','J','Q','K','A'];
+  const RANKS = ['7','8','9','10','J','Q','K','A'];
   const SUIT_LIST = ['♠','♣','♦','♥'];
 
   function buildShuffledDeck(){
