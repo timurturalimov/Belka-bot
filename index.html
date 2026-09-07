@@ -263,6 +263,9 @@
     <div class="trump"><span class="suit" id="trumpSuitIcon">♦</span><span id="trumpLabel">Козырь: бубны</span></div>
     <div class="score">Мы<span class="num" id="scoreUs">0</span> · Они<span class="num" id="scoreThem">0</span></div>
   </div>
+  <div class="topbar" style="padding-top:0;">
+    <div class="score" style="font-size:11px; opacity:0.8;">Партия — глаза (до 12): Мы<span class="num" id="eyesUs">0</span> · Они<span class="num" id="eyesThem">0</span></div>
+  </div>
 
   <div class="opponents">
     <div>
@@ -292,7 +295,7 @@
 
 <div class="waiting" id="dealResult" style="display:none;">
   <div class="dots" style="font-size:18px;">Раздача окончена</div>
-  <div class="count" id="dealResultText" style="font-size:26px;">Мы: 0 — Они: 0</div>
+  <div class="count" id="dealResultText" style="font-size:22px; white-space:pre-line;">Мы: 0 — Они: 0</div>
   <button class="menu-btn" id="btnPlayAgain">В меню</button>
 </div>
 
@@ -343,17 +346,42 @@
     return deck;
   }
 
+  let matchState = null; // { personalSuit, dealNumber, dealerSeat, eyes:{us,them} } — lives only on the dealing client
+
   function dealAndWriteHands(){
+    if (!matchState) {
+      matchState = { personalSuit: null, dealNumber: 1, dealerSeat: 0, eyes: { us: 0, them: 0 } };
+    }
     const deck = buildShuffledDeck();
     const hands = [[], [], [], []];
     for (let seat = 0; seat < 4; seat++) {
       hands[seat] = deck.slice(seat * 8, seat * 8 + 8);
     }
-    const trumpSuit = SUIT_LIST[Math.floor(Math.random() * SUIT_LIST.length)];
+
+    // whoever holds the jack of clubs determines this deal's trump
+    let clubsJackSeat = 0;
+    for (let seat = 0; seat < 4; seat++) {
+      if (hands[seat].some(c => c.rank === 'J' && c.suit === '♣')) { clubsJackSeat = seat; break; }
+    }
+
+    let trumpSuit;
+    if (matchState.dealNumber === 1) {
+      trumpSuit = '♣';
+      matchState.personalSuit = {};
+      matchState.personalSuit[clubsJackSeat] = '♣';
+      matchState.personalSuit[(clubsJackSeat + 1) % 4] = '♥';
+      matchState.personalSuit[(clubsJackSeat + 2) % 4] = '♠';
+      matchState.personalSuit[(clubsJackSeat + 3) % 4] = '♦';
+    } else {
+      trumpSuit = matchState.personalSuit[clubsJackSeat];
+    }
+
     roomRef.update({
       hands: hands,
       trumpSuit: trumpSuit,
-      status: 'dealt'
+      status: 'dealt',
+      dealerSeat: matchState.dealerSeat,
+      dealNumber: matchState.dealNumber
     });
     // if this was a listed open room, it's full now — take it off the public list
     db.ref('public_rooms/' + roomRef.key).remove();
@@ -581,8 +609,8 @@
         renderHand(room.hands[mySeat]);
 
         const isBotGame = Object.values(players).some(p => p && p.bot);
-        if (isBotGame && !gameEngineStarted) {
-          gameEngineStarted = true;
+        if (isBotGame && room.dealNumber !== lastEngineDealNumber) {
+          lastEngineDealNumber = room.dealNumber;
           startBotEngine(room);
         }
       } else if (seatsFilled === 4 && mySeat === 0 && room.status !== 'dealt') {
@@ -674,7 +702,7 @@
 
   // ==================== Розыгрыш взяток (пока только в режиме "с ботами") ====================
   let gameState = null;
-  let gameEngineStarted = false;
+  let lastEngineDealNumber = 0;
 
   const RANK_ORDER = { '7':0, '8':1, '9':2, '10':3, 'Q':4, 'K':5, 'A':6 };
   const JACK_ORDER = { '♣':0, '♠':1, '♥':2, '♦':3 };
@@ -715,14 +743,24 @@
     gameState = {
       hands: JSON.parse(JSON.stringify(room.hands)),
       trumpSuit: room.trumpSuit,
+      dealerSeat: room.dealerSeat,
+      clubsJackTeamThisDeal: null, // set below, used for eye scoring at deal end
       ledSuit: null,
       ledSuitsPlayed: new Set(),
       trick: [],
-      leader: (mySeat + 1) % 4,
+      leader: (room.dealerSeat + 1) % 4, // left of the dealer leads
       turn: null,
       scores: { us: 0, them: 0 },
+      trickCounts: { us: 0, them: 0 },
       trickNum: 0
     };
+    // whichever seat holds the jack of clubs this deal tells us which team "has trump"
+    for (let seat = 0; seat < 4; seat++) {
+      if (gameState.hands[seat].some(c => c.rank === 'J' && c.suit === '♣')) {
+        gameState.clubsJackTeamThisDeal = isMyTeam(seat) ? 'us' : 'them';
+        break;
+      }
+    }
     gameState.turn = gameState.leader;
     updateScoreUI();
     renderTrickArea();
@@ -771,14 +809,16 @@
       if (p > bestPower) { bestPower = p; best = gameState.trick[i]; }
     }
     const points = gameState.trick.reduce((sum, t) => sum + cardPoints(t.card), 0);
-    if (isMyTeam(best.seat)) gameState.scores.us += points; else gameState.scores.them += points;
+    const winnerTeam = isMyTeam(best.seat) ? 'us' : 'them';
+    gameState.scores[winnerTeam] += points;
+    gameState.trickCounts[winnerTeam]++;
     gameState.trickNum++;
     gameState.trick = [];
     gameState.ledSuit = null;
     updateScoreUI();
 
     if (gameState.trickNum === 8) {
-      showDealResult();
+      finishDeal();
     } else {
       gameState.leader = best.seat;
       gameState.turn = best.seat;
@@ -787,9 +827,48 @@
     }
   }
 
+  function otherTeam(team){ return team === 'us' ? 'them' : 'us'; }
+
+  function finishDeal(){
+    const s = gameState.scores;
+
+    // a team that took zero tricks this deal instantly gives the opponents all 12 eyes
+    if (gameState.trickCounts.us === 0 || gameState.trickCounts.them === 0) {
+      const winner = gameState.trickCounts.us === 0 ? 'them' : 'us';
+      matchState.eyes[winner] = 12;
+      showDealSummary(`Взяли всё! ${winner === 'us' ? 'Мы' : 'Они'} получают все 12 глаз.`);
+      return;
+    }
+
+    // exact 60:60 tie — this deal doesn't count, play a replay deal worth a flat 4 eyes
+    if (s.us === 60 && s.them === 60) {
+      matchState.replayFor4 = true;
+      showDealSummary('Ничья 60:60 — переигровка, на кону 4 глаза.', true);
+      return;
+    }
+
+    const winnerTeam = s.us > s.them ? 'us' : 'them';
+    const loserTeam = otherTeam(winnerTeam);
+    const spasReached = s[loserTeam] >= 31;
+    const trumpWithWinner = gameState.clubsJackTeamThisDeal === winnerTeam;
+
+    let eyes;
+    if (trumpWithWinner) eyes = spasReached ? 1 : 2;
+    else eyes = spasReached ? 2 : 3;
+
+    if (matchState.replayFor4) { eyes = 4; matchState.replayFor4 = false; }
+
+    matchState.eyes[winnerTeam] += eyes;
+    showDealSummary(`${winnerTeam === 'us' ? 'Мы' : 'Они'} берут ${eyes} ${eyes === 1 ? 'глаз' : (eyes < 5 ? 'глаза' : 'глаз')} (${s.us}:${s.them}${spasReached ? ', спас есть' : ''})`);
+  }
+
   function updateScoreUI(){
     document.getElementById('scoreUs').textContent = gameState.scores.us;
     document.getElementById('scoreThem').textContent = gameState.scores.them;
+    if (matchState) {
+      document.getElementById('eyesUs').textContent = matchState.eyes.us;
+      document.getElementById('eyesThem').textContent = matchState.eyes.them;
+    }
   }
 
   const seatPositionClass = { 0: 'trick-bottom', 1: 'trick-left', 2: 'trick-top', 3: 'trick-right' };
@@ -811,20 +890,47 @@
     });
   }
 
-  function showDealResult(){
+  function showDealSummary(text, isReplay){
+    if (matchState.eyes.us >= 12 || matchState.eyes.them >= 12) {
+      showMatchEnd(text);
+      return;
+    }
     const overlay = document.getElementById('dealResult');
-    document.getElementById('dealResultText').textContent =
-      `Мы: ${gameState.scores.us} — Они: ${gameState.scores.them}`;
+    document.getElementById('dealResultText').textContent = text;
+    document.getElementById('btnPlayAgain').textContent = isReplay ? 'Переигровка' : 'Следующая раздача';
     overlay.style.display = 'flex';
   }
 
+  function showMatchEnd(lastDealText){
+    const winner = matchState.eyes.us >= 12 ? 'Мы' : 'Они';
+    const overlay = document.getElementById('dealResult');
+    document.getElementById('dealResultText').textContent =
+      `${lastDealText}\n\n${winner} выигрывают партию! (${matchState.eyes.us} : ${matchState.eyes.them})`;
+    document.getElementById('btnPlayAgain').textContent = 'В меню';
+    overlay.style.display = 'flex';
+    overlay.dataset.matchOver = 'true';
+  }
+
   document.getElementById('btnPlayAgain').addEventListener('click', () => {
-    document.getElementById('dealResult').style.display = 'none';
-    gameState = null;
-    gameEngineStarted = false;
-    roomRef = null;
-    mySeat = null;
-    showScreen('menu');
+    const overlay = document.getElementById('dealResult');
+    const matchOver = overlay.dataset.matchOver === 'true';
+    overlay.style.display = 'none';
+    overlay.dataset.matchOver = 'false';
+
+    if (matchOver) {
+      gameState = null;
+      matchState = null;
+      lastEngineDealNumber = 0;
+      roomRef = null;
+      mySeat = null;
+      showScreen('menu');
+      return;
+    }
+
+    // next deal: rotate the dealer, keep the same room/players
+    matchState.dealNumber++;
+    matchState.dealerSeat = (matchState.dealerSeat + 1) % 4;
+    dealAndWriteHands();
   });
 </script>
 
