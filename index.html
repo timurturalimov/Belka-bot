@@ -34,8 +34,6 @@
     display:flex; flex-direction:column;
     justify-content:space-between;
   }
-
-  /* top bar: trump + score */
   .topbar{
     display:flex; align-items:center; justify-content:space-between;
     padding:14px 18px 0;
@@ -58,8 +56,6 @@
     border:1px solid rgba(201,161,59,0.3);
   }
   .score span.num{color:var(--gold); font-weight:600; margin-left:4px;}
-
-  /* opponents */
   .opponents{
     display:flex; justify-content:center; gap:56px;
     margin-top:6px;
@@ -79,8 +75,6 @@
     text-align:center; font-size:11px; color:var(--gold);
     margin-top:4px; opacity:.85;
   }
-
-  /* trick area (center) */
   .trick{
     flex:1;
     display:flex; align-items:center; justify-content:center;
@@ -91,8 +85,6 @@
     font-size:12px; color:rgba(244,236,216,0.35);
     letter-spacing:.5px;
   }
-
-  /* player's hand */
   .handzone{
     position:relative;
     height:158px;
@@ -132,7 +124,6 @@
     margin-bottom:26px;
     box-shadow:0 8px 14px rgba(0,0,0,.55);
   }
-
   .hint{
     text-align:center;
     font-size:11px;
@@ -140,7 +131,6 @@
     padding-bottom:8px;
     letter-spacing:.3px;
   }
-
   .waiting{
     position:fixed; inset:0;
     display:flex; flex-direction:column; align-items:center; justify-content:center;
@@ -151,7 +141,6 @@
   .waiting .dots{ font-size:15px; letter-spacing:.4px; color:var(--card-cream); }
   .waiting .count{ font-size:34px; font-weight:700; color:var(--gold); }
   .waiting .sub{ font-size:12px; color:rgba(244,236,216,0.5); }
-
   .menu-btn{
     font-family:inherit;
     font-size:15px;
@@ -197,9 +186,7 @@
   }
   .room-item .creator{ font-size:14px; }
   .room-item .count{ font-size:13px; color:var(--gold); font-weight:600; }
-
   .disabled-card{ opacity:0.4; filter:grayscale(60%); }
-
   .trick-card{
     position:absolute;
     width:50px; height:72px;
@@ -298,7 +285,6 @@
   <div class="count" id="dealResultText" style="font-size:22px; white-space:pre-line;">Мы: 0 — Они: 0</div>
   <button class="menu-btn" id="btnPlayAgain">В меню</button>
 </div>
-
 <script>
   const tg = window.Telegram && window.Telegram.WebApp;
   if (tg) { tg.ready(); tg.expand(); }
@@ -358,7 +344,6 @@
       hands[seat] = deck.slice(seat * 8, seat * 8 + 8);
     }
 
-    // whoever holds the jack of clubs determines this deal's trump
     let clubsJackSeat = 0;
     for (let seat = 0; seat < 4; seat++) {
       if (hands[seat].some(c => c.rank === 'J' && c.suit === '♣')) { clubsJackSeat = seat; break; }
@@ -383,14 +368,12 @@
       dealerSeat: matchState.dealerSeat,
       dealNumber: matchState.dealNumber
     });
-    // if this was a listed open room, it's full now — take it off the public list
     db.ref('public_rooms/' + roomRef.key).remove();
   }
 
-  // ---------------- Matchmaking: group waiting players into fresh rooms of 4 ----------------
   function tryMatchmake(){
     db.ref('lobby/lock').transaction(locked => locked ? undefined : true, (error, committed) => {
-      if (error || !committed) return; // someone else already matchmaking
+      if (error || !committed) return;
       db.ref('lobby/queue').once('value').then(qSnap => {
         const queue = qSnap.val() || {};
         const entries = Object.keys(queue).map(id => ({ id, ...queue[id] }));
@@ -425,7 +408,6 @@
     return code;
   }
 
-  // ---------------- Random matchmaking ----------------
   document.getElementById('btnRandom').addEventListener('click', () => {
     document.getElementById('waitingLabel').textContent = 'Ожидаем игроков за столом…';
     showScreen('waiting');
@@ -446,7 +428,6 @@
     });
   });
 
-  // player already has an exact seat (assigned by matchmaking) — just read it
   function joinAssignedRoom(){
     roomRef.child('players').once('value').then(playersSnap => {
       const players = playersSnap.val() || {};
@@ -457,17 +438,16 @@
     });
   }
 
-  // create/join by seat directly: used for public "Создать комнату" and for private rooms
   function joinRoomBySeat(){
     roomRef.child('players').transaction(players => {
       players = players || {};
       for (const seat in players) {
-        if (players[seat] && players[seat].id === myId) return players; // already seated
+        if (players[seat] && players[seat].id === myId) return players;
       }
       for (let seat = 0; seat < 4; seat++) {
         if (!players[seat]) { players[seat] = { id: myId, name: myName }; return players; }
       }
-      return players; // room full
+      return players;
     }, (error, committed, snapshot) => {
       if (error) { console.error('join failed', error); return; }
       const players = snapshot.val() || {};
@@ -475,7 +455,6 @@
         if (players[seat] && players[seat].id === myId) mySeat = Number(seat);
       }
       if (mySeat !== null) {
-        // free the seat automatically if this player closes the app before the deal happens
         roomRef.child('players/' + mySeat).onDisconnect().remove();
       }
       if (mySeat === null) {
@@ -486,7 +465,6 @@
     });
   }
 
-  // ---------------- Соло с ботами (для теста без других игроков) ----------------
   document.getElementById('btnSolo').addEventListener('click', () => {
     const roomKey = db.ref('rooms').push().key;
     roomRef = db.ref('rooms/' + roomKey);
@@ -504,13 +482,12 @@
     roomRef.child('players').set(players).then(attachRoomListeners);
   });
 
-  // ---------------- Открытая комната (виден создатель, любой может присоединиться) ----------------
   document.getElementById('btnCreateRoom').addEventListener('click', () => {
     const roomKey = db.ref('rooms').push().key;
     roomRef = db.ref('rooms/' + roomKey);
     const publicRoomRef = db.ref('public_rooms/' + roomKey);
     publicRoomRef.set({ creatorName: myName, createdAt: firebase.database.ServerValue.TIMESTAMP });
-    publicRoomRef.onDisconnect().remove(); // if the creator closes the app before the room fills, don't leave a ghost listing
+    publicRoomRef.onDisconnect().remove();
     document.getElementById('waitingLabel').textContent = 'Комната создана — ждём игроков';
     document.getElementById('waitingSub').textContent = 'Другие увидят её в списке открытых комнат';
     document.getElementById('roomCodeBox').style.display = 'none';
@@ -555,7 +532,6 @@
     });
   });
 
-  // ---------------- Приватная комната (по коду, не видна в общем списке) ----------------
   document.getElementById('btnGoPrivate').addEventListener('click', () => showScreen('privateScreen'));
   document.getElementById('btnBackFromPrivate').addEventListener('click', () => showScreen('menu'));
 
@@ -589,7 +565,6 @@
 
       document.getElementById('waitingCount').textContent = seatsFilled + ' / 4';
 
-      // opponent names, in seat order relative to me
       const order = [1, 2, 3].map(offset => (mySeat + offset) % 4);
       const labelIds = ['oppLeft', 'oppTop', 'oppRight'];
       order.forEach((seat, i) => {
@@ -601,7 +576,7 @@
 
       if (room.status === 'dealt' && room.hands && room.hands[mySeat]) {
         document.getElementById('waiting').style.display = 'none';
-        roomRef.child('players/' + mySeat).onDisconnect().cancel(); // game started — no longer free my seat if I disconnect
+        roomRef.child('players/' + mySeat).onDisconnect().cancel();
         TRUMP_SUIT = room.trumpSuit;
         document.getElementById('trumpSuitIcon').textContent = TRUMP_SUIT;
         const trumpNames = {'♠':'пики', '♣':'трефы', '♦':'бубны', '♥':'червы'};
@@ -614,7 +589,6 @@
           startBotEngine(room);
         }
       } else if (seatsFilled === 4 && mySeat === 0 && room.status !== 'dealt') {
-        // I'm the first seat — I deal once everyone is seated
         dealAndWriteHands();
       }
     });
@@ -642,17 +616,12 @@
     const n = cards.length;
     if (n === 0) return;
 
-    // horizontal offset guarantees every card's rank corner stays visible,
-    // regardless of rotation — spacing is never left to overlap chance.
     const containerWidth = hand.clientWidth || 340;
     const maxUsableWidth = containerWidth - 12;
-    // try to lay cards out almost edge-to-edge with only a small overlap;
-    // if they don't fit at all, shrink the overlap further (never below a bare sliver)
     const idealOffset = CARD_W - 6;
     const fitOffset = n > 1 ? (maxUsableWidth - CARD_W) / (n - 1) : 0;
     const offset = n > 1 ? Math.min(idealOffset, fitOffset) : 0;
 
-    // rotation is purely cosmetic (fan tilt) — kept minimal so it never eats into visibility
     const maxTotalAngle = Math.min(14, n * 1.6);
     const angleStep = n > 1 ? maxTotalAngle / (n - 1) : 0;
 
@@ -661,8 +630,8 @@
       const angle = (i - (n - 1) / 2) * angleStep;
       const el = document.createElement('div');
       const isRed = SUITS[c.suit].color === 'red';
-      const isTrump = c.suit === TRUMP_SUIT || c.rank === 'J';
-      el.className = 'card' + (isRed ? ' red' : '') + (isTrump ? ' trump-card' : '');
+      const isTrumpCard = c.suit === TRUMP_SUIT || c.rank === 'J';
+      el.className = 'card' + (isRed ? ' red' : '') + (isTrumpCard ? ' trump-card' : '');
       el.style.transform = cardTransform(dx, angle, false);
       el.style.zIndex = i;
       el.innerHTML = `
@@ -683,7 +652,7 @@
         if (!wasSelected) {
           el.classList.add('selected');
           el.style.transform = cardTransform(dx, angle, true);
-          hand.appendChild(el); // bring to front while selected
+          hand.appendChild(el);
         }
       });
       if (gameState && gameState.turn === mySeat && !isCardLegal(c)) {
@@ -700,7 +669,6 @@
   renderHand = function(cards){ lastRenderedHand = cards; _renderHand(cards); };
   window.addEventListener('resize', () => { if (lastRenderedHand.length) _renderHand(lastRenderedHand); });
 
-  // ==================== Розыгрыш взяток (пока только в режиме "с ботами") ====================
   let gameState = null;
   let lastEngineDealNumber = 0;
 
@@ -714,26 +682,26 @@
     if (card.rank === 'J') return 1000 + JACK_ORDER[card.suit];
     if (card.suit === trumpSuit) return 500 + RANK_ORDER[card.rank];
     if (ledSuit && card.suit === ledSuit) return RANK_ORDER[card.rank];
-    return -1; // can't win this trick
+    return -1;
   }
 
-  function hasSuit(hand, suit){ return hand.some(c => c.suit === suit && c.rank !== 'J'); }
+  function isTrump(card, trumpSuit){ return card.rank === 'J' || card.suit === trumpSuit; }
+  function effectiveGroup(card, trumpSuit){ return isTrump(card, trumpSuit) ? 'TRUMP' : card.suit; }
+  function hasGroup(hand, group, trumpSuit){ return hand.some(c => effectiveGroup(c, trumpSuit) === group); }
 
-  function canPlay(hand, card, ledSuit, trumpSuit, ledSuitsPlayed){
-    if (!ledSuit) return true; // leading — anything goes, including leading an Ace
-    if (hasSuit(hand, ledSuit)) {
-      return card.suit === ledSuit && card.rank !== 'J'; // must follow suit with a plain card — trump/jacks can't substitute if you can follow
+  function canPlay(hand, card, ledGroup, trumpSuit, ledSuitsPlayed){
+    if (!ledGroup) return true;
+    if (hasGroup(hand, ledGroup, trumpSuit)) {
+      return effectiveGroup(card, trumpSuit) === ledGroup;
     }
-    // void of the led suit — free to trump...
-    if (card.rank === 'J' || card.suit === trumpSuit) return true;
-    // ...but discarding the Ace of a suit that has never been led this deal isn't allowed
+    if (effectiveGroup(card, trumpSuit) === 'TRUMP') return true;
     if (card.rank === 'A' && !ledSuitsPlayed.has(card.suit)) return false;
     return true;
   }
 
   function isCardLegal(card){
     if (!gameState) return true;
-    return canPlay(gameState.hands[mySeat], card, gameState.ledSuit, gameState.trumpSuit, gameState.ledSuitsPlayed);
+    return canPlay(gameState.hands[mySeat], card, gameState.ledGroup, gameState.trumpSuit, gameState.ledSuitsPlayed);
   }
 
   function partnerSeat(seat){ return (seat + 2) % 4; }
@@ -744,17 +712,17 @@
       hands: JSON.parse(JSON.stringify(room.hands)),
       trumpSuit: room.trumpSuit,
       dealerSeat: room.dealerSeat,
-      clubsJackTeamThisDeal: null, // set below, used for eye scoring at deal end
+      clubsJackTeamThisDeal: null,
       ledSuit: null,
+      ledGroup: null,
       ledSuitsPlayed: new Set(),
       trick: [],
-      leader: (room.dealerSeat + 1) % 4, // left of the dealer leads
+      leader: (room.dealerSeat + 1) % 4,
       turn: null,
       scores: { us: 0, them: 0 },
       trickCounts: { us: 0, them: 0 },
       trickNum: 0
     };
-    // whichever seat holds the jack of clubs this deal tells us which team "has trump"
     for (let seat = 0; seat < 4; seat++) {
       if (gameState.hands[seat].some(c => c.rank === 'J' && c.suit === '♣')) {
         gameState.clubsJackTeamThisDeal = isMyTeam(seat) ? 'us' : 'them';
@@ -768,7 +736,7 @@
   }
 
   function scheduleTurn(){
-    renderHand(gameState.hands[mySeat]); // refresh disabled/enabled state on my cards
+    renderHand(gameState.hands[mySeat]);
     if (gameState.turn !== mySeat) {
       setTimeout(botPlay, 600 + Math.random() * 500);
     }
@@ -776,7 +744,7 @@
 
   function botPlay(){
     const seat = gameState.turn;
-    const options = gameState.hands[seat].filter(c => canPlay(gameState.hands[seat], c, gameState.ledSuit, gameState.trumpSuit, gameState.ledSuitsPlayed));
+    const options = gameState.hands[seat].filter(c => canPlay(gameState.hands[seat], c, gameState.ledGroup, gameState.trumpSuit, gameState.ledSuitsPlayed));
     const card = options[Math.floor(Math.random() * options.length)];
     playCard(seat, card);
   }
@@ -787,6 +755,7 @@
     hand.splice(idx, 1);
     if (gameState.trick.length === 0) {
       gameState.ledSuit = (card.rank === 'J') ? null : card.suit;
+      gameState.ledGroup = effectiveGroup(card, gameState.trumpSuit);
       if (card.rank !== 'J') gameState.ledSuitsPlayed.add(card.suit);
     }
     gameState.trick.push({ seat, card });
@@ -815,6 +784,7 @@
     gameState.trickNum++;
     gameState.trick = [];
     gameState.ledSuit = null;
+    gameState.ledGroup = null;
     updateScoreUI();
 
     if (gameState.trickNum === 8) {
@@ -832,7 +802,6 @@
   function finishDeal(){
     const s = gameState.scores;
 
-    // a team that took zero tricks this deal instantly gives the opponents all 12 eyes
     if (gameState.trickCounts.us === 0 || gameState.trickCounts.them === 0) {
       const winner = gameState.trickCounts.us === 0 ? 'them' : 'us';
       matchState.eyes[winner] = 12;
@@ -840,7 +809,6 @@
       return;
     }
 
-    // exact 60:60 tie — this deal doesn't count, play a replay deal worth a flat 4 eyes
     if (s.us === 60 && s.them === 60) {
       matchState.replayFor4 = true;
       showDealSummary('Ничья 60:60 — переигровка, на кону 4 глаза.', true);
@@ -881,7 +849,7 @@
       return;
     }
     gameState.trick.forEach(({ seat, card }) => {
-      const relSeat = (seat - mySeat + 4) % 4; // 0=я(низ) 1=слева 2=сверху 3=справа
+      const relSeat = (seat - mySeat + 4) % 4;
       const el = document.createElement('div');
       const isRed = SUITS[card.suit].color === 'red';
       el.className = 'trick-card ' + seatPositionClass[relSeat] + (isRed ? ' red' : '');
@@ -927,7 +895,6 @@
       return;
     }
 
-    // next deal: rotate the dealer, keep the same room/players
     matchState.dealNumber++;
     matchState.dealerSeat = (matchState.dealerSeat + 1) % 4;
     dealAndWriteHands();
