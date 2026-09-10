@@ -815,16 +815,22 @@
       return;
     }
 
-    const winnerTeam = s.us > s.them ? 'us' : 'them';
+            const winnerTeam = s.us > s.them ? 'us' : 'them';
     const loserTeam = otherTeam(winnerTeam);
     const spasReached = s[loserTeam] >= 31;
     const trumpWithWinner = gameState.clubsJackTeamThisDeal === winnerTeam;
 
     let eyes;
-    if (trumpWithWinner) eyes = spasReached ? 1 : 2;
-    else eyes = spasReached ? 2 : 3;
+    if (matchState.dealNumber === 1) {
+      eyes = 2; // первая раздача матча всегда даёт ровно 2 глаза
+    } else if (trumpWithWinner) {
+      eyes = spasReached ? 1 : 2;
+    } else {
+      eyes = spasReached ? 2 : 3;
+    }
 
     if (matchState.replayFor4) { eyes = 4; matchState.replayFor4 = false; }
+
 
     matchState.eyes[winnerTeam] += eyes;
     showDealSummary(`${winnerTeam === 'us' ? 'Мы' : 'Они'} берут ${eyes} ${eyes === 1 ? 'глаз' : (eyes < 5 ? 'глаза' : 'глаз')} (${s.us}:${s.them}${spasReached ? ', спас есть' : ''})`);
