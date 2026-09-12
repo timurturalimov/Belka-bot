@@ -737,7 +737,9 @@
 
     const turnPlayer = players[deal.turn];
     if (turnPlayer && turnPlayer.bot && mySeat === 0) {
-      const stamp = deal.turn + ':' + deal.trick.length + ':' + deal.trickNum;
+
+  const stamp = deal.turn + ':' + (deal.trick || []).length + ':' + deal.trickNum;
+
       if (dealVersionSeen !== stamp) {
         dealVersionSeen = stamp;
         setTimeout(() => botPlay(deal), 600 + Math.random() * 500);
@@ -757,9 +759,11 @@
   // ---------------- Ход картой — атомарная транзакция в Firebase ----------------
   function playCard(seat, card){
     roomRef.child('deal').transaction(deal => {
-      if (!deal || deal.status === 'finished') return deal;
-      if (deal.turn !== seat) return deal;
-      const hand = deal.hands[seat];
+  if (!deal || deal.status === 'finished') return deal;
+  if (deal.turn !== seat) return deal;
+  deal.trick = deal.trick || [];
+  const hand = deal.hands[seat];
+
       const idx = hand.findIndex(c => c.rank === card.rank && c.suit === card.suit);
       if (idx === -1) return deal;
       if (!canPlay(hand, card, deal.ledGroup, deal.trumpSuit, deal.ledSuitsPlayed || [])) return deal;
