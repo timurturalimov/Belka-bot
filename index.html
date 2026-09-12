@@ -17,7 +17,6 @@
     --card-cream-edge:#e2d5b3;
     --ink:#2a2420;
     --red:#a33131;
-    --wood:#4a3323;
   }
   *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
   html,body{
@@ -58,31 +57,16 @@
   .card .rank.bottom{ align-self:flex-end; transform:rotate(180deg); }
   .card.red .rank, .card.red .suit-big{ color:var(--red); }
   .card.trump-card{ border:1.5px solid var(--gold); box-shadow:0 3px 8px rgba(201,161,59,.45), 0 3px 6px rgba(0,0,0,.5); }
-  .card.selected{ margin-bottom:26px; box-shadow:0 8px 14px rgba(0,0,0,.55); }
   .hint{ text-align:center; font-size:11px; color:rgba(244,236,216,0.4); padding-bottom:8px; }
   .waiting{
     position:fixed; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center;
     gap:14px; background:radial-gradient(ellipse at 50% 40%, var(--felt-light), var(--felt-dark) 75%); z-index:50;
   }
-  .waiting .dots{ font-size:15px; color:var(--card-cream); }
   .waiting .count{ font-size:34px; font-weight:700; color:var(--gold); }
-  .waiting .sub{ font-size:12px; color:rgba(244,236,216,0.5); }
   .menu-btn{
     font-family:inherit; font-size:15px; color:var(--card-cream); background:rgba(0,0,0,0.28);
     border:1px solid var(--gold-dim); border-radius:12px; padding:14px 28px; width:240px; cursor:pointer;
   }
-  .menu-btn:active{ background:rgba(0,0,0,0.45); }
-  .code-input{
-    font-family:inherit; font-size:22px; letter-spacing:4px; text-align:center; text-transform:uppercase;
-    width:160px; padding:10px 0; border-radius:10px; border:1px solid var(--gold-dim); background:rgba(0,0,0,0.28); color:var(--card-cream);
-  }
-  .code-input::placeholder{ color:rgba(244,236,216,0.35); }
-  .room-code{ font-size:14px; color:var(--card-cream); background:rgba(0,0,0,0.28); border:1px solid var(--gold-dim); border-radius:10px; padding:8px 16px; }
-  .room-code span{ color:var(--gold); font-weight:700; letter-spacing:3px; }
-  .back-btn{ align-self:flex-start; margin-bottom:10px; padding:8px 16px; font-size:13px; width:auto; }
-  .room-item{ display:flex; justify-content:space-between; align-items:center; background:rgba(0,0,0,0.28); border:1px solid var(--gold-dim); border-radius:10px; padding:12px 16px; cursor:pointer; }
-  .room-item .creator{ font-size:14px; }
-  .room-item .count{ font-size:13px; color:var(--gold); font-weight:600; }
   .disabled-card{ opacity:0.4; filter:grayscale(60%); pointer-events:none; }
   .trick-card{
     position:absolute; width:50px; height:72px; background:var(--card-cream); border:1px solid var(--card-cream-edge);
@@ -100,38 +84,13 @@
 <body>
 
 <div class="waiting" id="menu">
-  <div class="dots" style="font-size:20px; font-weight:700; color:var(--gold); margin-bottom:6px;">Белка</div>
-  <button class="menu-btn" id="btnRandom">Играть со случайными</button>
+  <div style="font-size:22px; font-weight:700; color:var(--gold); margin-bottom:10px;">Белка</div>
   <button class="menu-btn" id="btnSolo">Играть с ботами</button>
-  <button class="menu-btn" id="btnCreateRoom">Создать комнату</button>
-  <button class="menu-btn" id="btnBrowseRooms">Присоединиться к комнате</button>
-  <button class="menu-btn" id="btnGoPrivate">Приватная комната</button>
-</div>
-
-<div class="waiting" id="privateScreen" style="display:none;">
-  <button class="menu-btn back-btn" id="btnBackFromPrivate">‹ Назад</button>
-  <div class="dots" style="font-size:16px;">Приватная комната</div>
-  <button class="menu-btn" id="btnCreatePrivate">Создать приватную</button>
-  <div style="display:flex; flex-direction:column; align-items:center; gap:10px; margin-top:4px;">
-    <input id="codeInput" maxlength="5" placeholder="КОД" class="code-input">
-    <button class="menu-btn" id="btnJoinPrivate">Войти по коду</button>
-  </div>
-</div>
-
-<div class="waiting" id="roomListScreen" style="display:none;">
-  <button class="menu-btn back-btn" id="btnBackFromList">‹ Назад</button>
-  <div class="dots" style="font-size:16px;">Открытые комнаты</div>
-  <div id="roomListItems" style="display:flex; flex-direction:column; gap:10px; width:260px; max-height:50vh; overflow-y:auto;"></div>
-  <div class="sub" id="roomListEmpty">Пока никто не создал комнату</div>
 </div>
 
 <div class="waiting" id="waiting" style="display:none;">
   <div class="count" id="waitingCount">1 / 4</div>
-  <div class="dots" id="waitingLabel">Ожидаем игроков за столом…</div>
-  <div class="sub" id="waitingSub"></div>
-  <div class="room-code" id="roomCodeBox" style="display:none;">
-    Код комнаты: <span id="roomCodeText"></span>
-  </div>
+  <div style="font-size:14px;" id="waitingLabel">Загрузка игры…</div>
 </div>
 
 <div class="table">
@@ -144,18 +103,9 @@
   </div>
 
   <div class="opponents">
-    <div>
-      <div class="opp-hand" id="oppLeft"></div>
-      <div class="opp-label">Айдос</div>
-    </div>
-    <div>
-      <div class="opp-hand" id="oppTop"></div>
-      <div class="opp-label">Динара</div>
-    </div>
-    <div>
-      <div class="opp-hand" id="oppRight"></div>
-      <div class="opp-label">Ержан</div>
-    </div>
+    <div><div class="opp-hand" id="oppLeft"></div><div class="opp-label">Айдос</div></div>
+    <div><div class="opp-hand" id="oppTop"></div><div class="opp-label">Динара</div></div>
+    <div><div class="opp-hand" id="oppRight"></div><div class="opp-label">Ержан</div></div>
   </div>
 
   <div class="trick" id="trick">
@@ -165,12 +115,12 @@
   <div class="handzone">
     <div class="hand" id="hand"></div>
   </div>
-  <div class="hint">Нажми на карту, чтобы выбрать её для хода</div>
+  <div class="hint" id="hintText">Нажми на карту, чтобы сделать ход</div>
 </div>
 
 <div class="waiting" id="dealResult" style="display:none;">
-  <div class="dots" style="font-size:18px;">Раздача окончена</div>
-  <div class="count" id="dealResultText" style="font-size:22px; white-space:pre-line;">Мы: 0 — Они: 0</div>
+  <div style="font-size:20px; color:var(--gold); font-weight:700;">Раздача окончена</div>
+  <div class="count" id="dealResultText" style="font-size:20px; text-align:center; white-space:pre-line; margin:10px 0;">Мы: 0 — Они: 0</div>
   <button class="menu-btn" id="btnPlayAgain">В меню</button>
 </div>
 
@@ -193,15 +143,8 @@
   firebase.initializeApp(firebaseConfig);
   const db = firebase.database();
 
-  const tgUser = tg && tg.initDataUnsafe && tg.initDataUnsafe.user;
-  const myId = tgUser ? String(tgUser.id) : (sessionStorage.getItem('guestId') || (() => {
-    const id = 'guest_' + Math.random().toString(36).slice(2, 9);
-    sessionStorage.setItem('guestId', id);
-    return id;
-  })());
-  const myName = tgUser ? (tgUser.first_name || 'Игрок') : 'Гость';
-
-  let mySeat = null;
+  const myId = 'player_' + Math.random().toString(36).slice(2, 7);
+  let mySeat = 0;
   let roomRef = null;
 
   const RANKS = ['7','8','9','10','J','Q','K','A'];
@@ -250,39 +193,20 @@
         if (hands[seat].some(c => c.rank === 'J' && c.suit === '♣')) { clubsJackSeat = seat; break; }
       }
 
-      let trumpSuit;
-      if (match.dealNumber === 1) {
-        trumpSuit = '♣';
-        match.personalSuit = {};
-        match.personalSuit[clubsJackSeat] = '♣';
-        match.personalSuit[(clubsJackSeat + 1) % 4] = '♥';
-        match.personalSuit[(clubsJackSeat + 2) % 4] = '♠';
-        match.personalSuit[(clubsJackSeat + 3) % 4] = '♦';
-      } else {
-        trumpSuit = match.personalSuit[clubsJackSeat] || '♣';
-      }
-
+      let trumpSuit = '♣';
       for (let seat = 0; seat < 4; seat++) {
         hands[seat] = sortHand(hands[seat], trumpSuit);
       }
 
       const deal = {
         hands, trumpSuit,
-        dealNumber: match.dealNumber, dealerSeat: match.dealerSeat, turn: (match.dealerSeat + 1) % 4,
-        trick: [], lastCompletedTrick: [], isTrickResolving: false,
-        ledGroup: null, ledSuit: null, ledSuitsPlayed: [],
-        scores: { 0: 0, 1: 0 }, trickCounts: { 0: 0, 1: 0 },
-        clubsJackTeam: clubsJackSeat % 2, trickNum: 0, status: 'playing'
+        dealNumber: match.dealNumber, dealerSeat: match.dealerSeat, turn: 0,
+        trick: [], isTrickResolving: false,
+        ledGroup: null, ledSuit: null,
+        scores: { 0: 0, 1: 0 }, trickNum: 0, status: 'playing'
       };
 
       roomRef.update({ match, deal, status: 'dealt' });
-      db.ref('public_rooms/' + roomRef.key).remove();
-    });
-  }
-
-  function showScreen(id){
-    ['menu', 'privateScreen', 'roomListScreen', 'waiting'].forEach(s => {
-      document.getElementById(s).style.display = (s === id) ? 'flex' : 'none';
     });
   }
 
@@ -291,15 +215,13 @@
     roomRef = db.ref('rooms/' + roomKey);
     mySeat = 0;
     const players = {
-      0: { id: myId, name: myName },
+      0: { id: myId, name: 'Вы' },
       1: { id: 'bot_1', name: 'Бот Айдос', bot: true },
       2: { id: 'bot_2', name: 'Бот Динара', bot: true },
       3: { id: 'bot_3', name: 'Бот Ержан', bot: true }
     };
-    document.getElementById('waitingLabel').textContent = 'Сажаем ботов за стол…';
-    document.getElementById('waitingSub').textContent = '';
-    document.getElementById('roomCodeBox').style.display = 'none';
-    showScreen('waiting');
+    document.getElementById('menu').style.display = 'none';
+    document.getElementById('waiting').style.display = 'flex';
     roomRef.child('players').set(players).then(attachRoomListeners);
   });
 
@@ -307,34 +229,30 @@
     roomRef.on('value', snap => {
       const room = snap.val() || {};
       const players = room.players || {};
-      const seatsFilled = Object.keys(players).length;
-
-      document.getElementById('waitingCount').textContent = seatsFilled + ' / 4';
 
       const order = [1, 2, 3].map(offset => (mySeat + offset) % 4);
       const labelIds = ['oppLeft', 'oppTop', 'oppRight'];
       order.forEach((seat, i) => {
         const p = players[seat];
         const labelEl = document.querySelector('#' + labelIds[i]).parentElement.querySelector('.opp-label');
-        labelEl.textContent = p ? p.name : 'Ожидание…';
+        if (labelEl) labelEl.textContent = p ? p.name : 'Ожидание…';
         const cardCount = (room.deal && room.deal.hands && room.deal.hands[seat]) ? room.deal.hands[seat].length : 0;
         renderOpponentBacks(document.getElementById(labelIds[i]), cardCount);
       });
 
-      if (room.status === 'dealt' && room.deal && room.deal.hands && room.deal.hands[mySeat] !== undefined) {
+      if (room.status === 'dealt' && room.deal && room.deal.hands) {
         document.getElementById('waiting').style.display = 'none';
         TRUMP_SUIT = room.deal.trumpSuit;
         document.getElementById('trumpSuitIcon').textContent = TRUMP_SUIT;
-        const trumpNames = {'♠':'пики', '♣':'трефы', '♦':'бубны', '♥':'червы'};
-        document.getElementById('trumpLabel').textContent = 'Козырь: ' + trumpNames[TRUMP_SUIT];
         syncDealState(room, players);
-      } else if (seatsFilled === 4 && mySeat === 0 && room.status !== 'dealt') {
+      } else if (mySeat === 0 && room.status !== 'dealt') {
         dealAndWriteHands();
       }
     });
   }
 
   function renderOpponentBacks(el, count){
+    if(!el) return;
     el.innerHTML = '';
     for(let i=0;i<count;i++){
       const d = document.createElement('div');
@@ -343,28 +261,20 @@
     }
   }
 
-  const CARD_W = 58;
-  function cardTransform(dx, angle, lifted){
-    return `translateX(-50%) translateX(${dx}px) rotate(${angle}deg) translateY(${lifted ? -30 : 0}px)`;
-  }
-
   function renderHand(cards){
     const hand = document.getElementById('hand');
     hand.innerHTML = '';
     if (!cards || cards.length === 0) return;
     const n = cards.length;
-    const containerWidth = hand.clientWidth || 340;
-    const offset = n > 1 ? Math.min(CARD_W - 6, (containerWidth - 12 - CARD_W) / (n - 1)) : 0;
-    const angleStep = n > 1 ? Math.min(14, n * 1.6) / (n - 1) : 0;
+    const offset = n > 1 ? Math.min(52, (hand.clientWidth - 58) / (n - 1)) : 0;
 
     cards.forEach((c, i) => {
       const dx = (i - (n - 1) / 2) * offset;
-      const angle = (i - (n - 1) / 2) * angleStep;
       const el = document.createElement('div');
       const isRed = SUITS[c.suit].color === 'red';
       const isTrumpCard = c.suit === TRUMP_SUIT || c.rank === 'J';
       el.className = 'card' + (isRed ? ' red' : '') + (isTrumpCard ? ' trump-card' : '');
-      el.style.transform = cardTransform(dx, angle, false);
+      el.style.transform = `translateX(-50%) translateX(${dx}px)`;
       el.style.zIndex = i;
       el.innerHTML = `
         <div class="rank">${c.rank}<br>${c.suit}</div>
@@ -375,16 +285,17 @@
       const canClick = gameState && gameState.turn === mySeat && !gameState.isTrickResolving && isCardLegal(c);
 
       el.addEventListener('click', () => {
-        if (canClick) {
-          playCard(mySeat, c);
-        }
+        if (canClick) playCard(mySeat, c);
       });
 
       if (!canClick) el.classList.add('disabled-card');
-      el.dataset.dx = dx;
-      el.dataset.angle = angle;
       hand.appendChild(el);
     });
+
+    // Авто-ход если осталась 1 карта и наш ход
+    if (n === 1 && gameState && gameState.turn === mySeat && !gameState.isTrickResolving) {
+      setTimeout(() => playCard(mySeat, cards[0]), 300);
+    }
   }
 
   let gameState = null;
@@ -401,67 +312,43 @@
   function isTrump(card, trumpSuit){ return card.rank === 'J' || card.suit === trumpSuit; }
   function effectiveGroup(card, trumpSuit){ return isTrump(card, trumpSuit) ? 'TRUMP' : card.suit; }
 
-  function legalCardsForHand(hand, ledGroup, trumpSuit, ledSuitsPlayed) {
+  function legalCardsForHand(hand, ledGroup, trumpSuit) {
     if (!hand || hand.length === 0) return [];
     if (!ledGroup) return hand.slice();
-
     const sameGroup = hand.filter(c => effectiveGroup(c, trumpSuit) === ledGroup);
-    if (sameGroup.length > 0) return sameGroup;
-
-    const trumps = hand.filter(c => effectiveGroup(c, trumpSuit) === 'TRUMP');
-    const validDiscards = hand.filter(c => {
-      if (effectiveGroup(c, trumpSuit) === 'TRUMP') return false; 
-      const suitPlayed = (ledSuitsPlayed || []).includes(c.suit);
-      const countInSuit = hand.filter(x => x.suit === c.suit).length;
-      if (c.rank === 'A' && !suitPlayed && countInSuit > 1) return false; 
-      return true;
-    });
-
-    const allowed = trumps.concat(validDiscards);
-    return allowed.length > 0 ? allowed : hand.slice();
-  }
-
-  function canPlay(hand, card, ledGroup, trumpSuit, ledSuitsPlayed){
-    const legal = legalCardsForHand(hand, ledGroup, trumpSuit, ledSuitsPlayed);
-    return legal.some(c => c.suit === card.suit && c.rank === card.rank);
+    return sameGroup.length > 0 ? sameGroup : hand.slice();
   }
 
   function isCardLegal(card){
     if (!gameState || !gameState.hands || !gameState.hands[mySeat]) return false;
-    return canPlay(gameState.hands[mySeat], card, gameState.ledGroup, gameState.trumpSuit, gameState.ledSuitsPlayed);
+    const legal = legalCardsForHand(gameState.hands[mySeat], gameState.ledGroup, gameState.trumpSuit);
+    return legal.some(c => c.suit === card.suit && c.rank === card.rank);
   }
-
-  function myTeam(){ return mySeat % 2; }
 
   function syncDealState(room, players){
     const deal = room.deal;
     gameState = deal;
 
-    if (room.match) updateScoreUI(room);
+    updateScoreUI(room);
     renderTrickArea();
-    if (deal.hands) {
-      renderHand(deal.hands[mySeat] || []);
-    }
+    renderHand(deal.hands[mySeat] || []);
 
     if (deal.status === 'finished') {
       showDealSummary(room);
       return;
-    } else {
-      document.getElementById('dealResult').style.display = 'none';
     }
 
-    if (deal.isTrickResolving) {
-      if (mySeat === 0) {
-        clearTimeout(botTimer);
-        botTimer = setTimeout(() => finalizeTrickInDB(), 800);
-      }
+    // Защита от зависания: если на столе 4 карты — мгновенно очищаем взятку
+    if (deal.trick && deal.trick.length === 4) {
+      clearTimeout(botTimer);
+      botTimer = setTimeout(() => finalizeTrickInDB(), 400);
       return;
     }
 
     const turnPlayer = players[deal.turn];
     if (turnPlayer && turnPlayer.bot && mySeat === 0) {
       clearTimeout(botTimer);
-      botTimer = setTimeout(() => botPlay(deal), 400);
+      botTimer = setTimeout(() => botPlay(deal), 350);
     }
   }
 
@@ -469,14 +356,14 @@
     const seat = deal.turn;
     const hand = deal.hands[seat];
     if (!hand || hand.length === 0) return;
-    const options = legalCardsForHand(hand, deal.ledGroup, deal.trumpSuit, deal.ledSuitsPlayed);
+    const options = legalCardsForHand(hand, deal.ledGroup, deal.trumpSuit);
     const card = options[Math.floor(Math.random() * options.length)];
     playCard(seat, card);
   }
 
   function playCard(seat, card) {
     roomRef.child('deal').transaction(deal => {
-      if (!deal || deal.status === 'finished' || deal.isTrickResolving) return deal;
+      if (!deal || deal.status === 'finished') return deal;
       if (deal.turn !== seat) return deal;
 
       deal.trick = deal.trick || [];
@@ -491,46 +378,36 @@
       if (deal.trick.length === 0) {
         deal.ledSuit = (card.rank === 'J') ? null : card.suit;
         deal.ledGroup = effectiveGroup(card, deal.trumpSuit);
-        deal.ledSuitsPlayed = deal.ledSuitsPlayed || [];
-        if (card.rank !== 'J' && !deal.ledSuitsPlayed.includes(card.suit)) {
-          deal.ledSuitsPlayed.push(card.suit);
-        }
       }
       
       deal.trick.push({ seat, card });
 
       if (deal.trick.length < 4) {
         deal.turn = (seat + 1) % 4;
-        return deal;
+      } else {
+        deal.isTrickResolving = true;
       }
 
-      deal.isTrickResolving = true;
       return deal;
     });
   }
 
   function finalizeTrickInDB() {
     roomRef.child('deal').transaction(deal => {
-      if (!deal || !deal.isTrickResolving) return deal;
+      if (!deal || !deal.trick || deal.trick.length < 4) return deal;
 
       let best = deal.trick[0];
       let bestPower = trickCardPower(best.card, deal.ledSuit, deal.trumpSuit);
       for (let i = 1; i < 4; i++) {
         const p = trickCardPower(deal.trick[i].card, deal.ledSuit, deal.trumpSuit);
-        if (p > bestPower) { 
-          bestPower = p; 
-          best = deal.trick[i]; 
-        }
+        if (p > bestPower) { bestPower = p; best = deal.trick[i]; }
       }
 
       const points = deal.trick.reduce((sum, t) => sum + cardPoints(t.card), 0);
       const winnerTeam = best.seat % 2;
       
       deal.scores = deal.scores || { 0: 0, 1: 0 };
-      deal.trickCounts = deal.trickCounts || { 0: 0, 1: 0 };
-      
       deal.scores[winnerTeam] = (deal.scores[winnerTeam] || 0) + points;
-      deal.trickCounts[winnerTeam] = (deal.trickCounts[winnerTeam] || 0) + 1;
       deal.trickNum = (deal.trickNum || 0) + 1;
 
       deal.trick = [];
@@ -539,45 +416,19 @@
       deal.turn = best.seat;
       deal.isTrickResolving = false;
 
-      if (deal.trickNum >= 8) {
+      // Окончание игры после 8 взяток
+      if (deal.trickNum >= 8 || (deal.hands[0].length === 0 && deal.hands[1].length === 0)) {
         deal.status = 'finished';
-        const s = deal.scores;
-        const winnerTeam2 = s[0] >= s[1] ? 0 : 1;
-        deal.finishedWinnerTeam = winnerTeam2;
-        deal.finishedEyes = (s[0] === 60 && s[1] === 60) ? 0 : 2;
+        deal.finishedWinnerTeam = deal.scores[0] >= deal.scores[1] ? 0 : 1;
       }
 
       return deal;
-    }, () => {
-      if (mySeat === 0) applyDealResultIfNeeded();
-    });
-  }
-
-  function applyDealResultIfNeeded(){
-    roomRef.child('deal').transaction(deal => {
-      if (!deal || deal.status !== 'finished' || deal.eyesApplied) return deal;
-      deal.eyesApplied = true;
-      return deal;
-    }, (err, committed, snap) => {
-      if (!committed || !snap.val() || !snap.val().eyesApplied) return;
-      const deal = snap.val();
-      roomRef.child('match').transaction(match => {
-        if (!match) return match;
-        match.eyes = match.eyes || { 0: 0, 1: 0 };
-        match.eyes[deal.finishedWinnerTeam] = (match.eyes[deal.finishedWinnerTeam] || 0) + (deal.finishedEyes || 2);
-        return match;
-      });
     });
   }
 
   function updateScoreUI(room){
-    const my = myTeam();
-    const opp = 1 - my;
-    document.getElementById('scoreUs').textContent = room.deal.scores[my] || 0;
-    document.getElementById('scoreThem').textContent = room.deal.scores[opp] || 0;
-    const eyes = (room.match && room.match.eyes) || { 0: 0, 1: 0 };
-    document.getElementById('eyesUs').textContent = eyes[my] || 0;
-    document.getElementById('eyesThem').textContent = eyes[opp] || 0;
+    document.getElementById('scoreUs').textContent = room.deal.scores[0] || 0;
+    document.getElementById('scoreThem').textContent = room.deal.scores[1] || 0;
   }
 
   const seatPositionClass = { 0: 'trick-bottom', 1: 'trick-left', 2: 'trick-top', 3: 'trick-right' };
@@ -604,30 +455,19 @@
 
   function showDealSummary(room){
     const deal = room.deal;
-    const my = myTeam();
-    const opp = 1 - my;
-    const winnerIsMe = deal.finishedWinnerTeam === my;
+    const winnerIsMe = deal.finishedWinnerTeam === 0;
 
     const overlay = document.getElementById('dealResult');
-    document.getElementById('dealResultText').textContent = `${winnerIsMe ? 'Мы берём' : 'Они берут'} глаза!\nСчёт: Мы ${deal.scores[my]} — Они ${deal.scores[opp]}`;
-    document.getElementById('btnPlayAgain').textContent = 'В меню';
+    document.getElementById('dealResultText').textContent = `${winnerIsMe ? 'Вы выиграли!' : 'Они выиграли!'}\nСчёт: Мы ${deal.scores[0]} — Они ${deal.scores[1]}`;
     overlay.style.display = 'flex';
   }
 
   document.getElementById('btnPlayAgain').addEventListener('click', () => {
     document.getElementById('dealResult').style.display = 'none';
+    document.getElementById('menu').style.display = 'flex';
     gameState = null;
     roomRef = null;
-    mySeat = null;
-    showScreen('menu');
   });
-
-  document.getElementById('btnRandom').addEventListener('click', () => showScreen('menu'));
-  document.getElementById('btnCreateRoom').addEventListener('click', () => showScreen('menu'));
-  document.getElementById('btnBrowseRooms').addEventListener('click', () => showScreen('menu'));
-  document.getElementById('btnGoPrivate').addEventListener('click', () => showScreen('menu'));
-  document.getElementById('btnBackFromPrivate').addEventListener('click', () => showScreen('menu'));
-  document.getElementById('btnBackFromList').addEventListener('click', () => showScreen('menu'));
 </script>
 </body>
 </html>
