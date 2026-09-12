@@ -269,7 +269,7 @@
       const deal = {
         hands, trumpSuit,
         dealNumber: match.dealNumber, dealerSeat: match.dealerSeat, turn: (match.dealerSeat + 1) % 4,
-        trick: [], lastCompletedTrick: null, isTrickResolving: false,
+        trick: [], lastCompletedTrick: [], isTrickResolving: false,
         ledGroup: null, ledSuit: null, ledSuitsPlayed: [],
         scores: { 0: 0, 1: 0 }, trickCounts: { 0: 0, 1: 0 },
         clubsJackTeam: clubsJackSeat % 2, trickNum: 0, status: 'playing'
@@ -527,8 +527,11 @@
         <div class="suit-big">${c.suit}</div>
         <div class="rank bottom">${c.rank}<br>${c.suit}</div>
       `;
+      
+      const canClick = gameState && gameState.turn === mySeat && !gameState.isTrickResolving && isCardLegal(c);
+
       el.addEventListener('click', () => {
-        if (gameState && gameState.turn === mySeat && !gameState.isTrickResolving && isCardLegal(c)) {
+        if (canClick) {
           playCard(mySeat, c);
           return;
         }
@@ -544,7 +547,7 @@
         }
       });
 
-      if (gameState && (gameState.turn !== mySeat || gameState.isTrickResolving || !isCardLegal(c))) {
+      if (!canClick) {
         el.classList.add('disabled-card');
       }
       el.dataset.dx = dx;
@@ -593,7 +596,7 @@
   }
 
   function isCardLegal(card){
-    if (!gameState || !gameState.hands || !gameState.hands[mySeat]) return true;
+    if (!gameState || !gameState.hands || !gameState.hands[mySeat]) return false;
     return canPlay(gameState.hands[mySeat], card, gameState.ledGroup, gameState.trumpSuit, gameState.ledSuitsPlayed);
   }
 
@@ -619,7 +622,7 @@
     if (deal.isTrickResolving) {
       if (mySeat === 0) {
         clearTimeout(botTimer);
-        botTimer = setTimeout(() => finalizeTrickInDB(), 600);
+        botTimer = setTimeout(() => finalizeTrickInDB(), 1000);
       }
       return;
     }
@@ -627,7 +630,7 @@
     const turnPlayer = players[deal.turn];
     if (turnPlayer && turnPlayer.bot && mySeat === 0) {
       clearTimeout(botTimer);
-      botTimer = setTimeout(() => botPlay(deal), 400);
+      botTimer = setTimeout(() => botPlay(deal), 500);
     }
   }
 
@@ -673,7 +676,7 @@
       }
 
       deal.isTrickResolving = true;
-      deal.lastCompletedTrick = deal.trick.slice();
+      deal.lastCompletedTrick = [];
       return deal;
     });
   }
@@ -702,8 +705,8 @@
       deal.trickCounts[winnerTeam] = (deal.trickCounts[winnerTeam] || 0) + 1;
       deal.trickNum = (deal.trickNum || 0) + 1;
 
-      deal.lastCompletedTrick = deal.trick.slice();
       deal.trick = [];
+      deal.lastCompletedTrick = [];
       deal.ledSuit = null;
       deal.ledGroup = null;
       deal.turn = best.seat;
@@ -779,9 +782,7 @@
   function renderTrickArea(){
     const trickEl = document.getElementById('trick');
     trickEl.innerHTML = '';
-    const currentTrick = (gameState && gameState.trick && gameState.trick.length > 0) 
-      ? gameState.trick 
-      : (gameState && gameState.lastCompletedTrick ? gameState.lastCompletedTrick : []);
+    const currentTrick = (gameState && gameState.trick) ? gameState.trick : [];
 
     if (!gameState || currentTrick.length === 0) {
       trickEl.innerHTML = '<span class="placeholder">' + (gameState ? 'ждём ход…' : 'ходов пока нет') + '</span>';
