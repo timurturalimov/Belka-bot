@@ -280,89 +280,9 @@
     });
   }
 
-  function tryMatchmake(){
-    db.ref('lobby/lock').transaction(locked => locked ? undefined : true, (error, committed) => {
-      if (error || !committed) return;
-      db.ref('lobby/queue').once('value').then(qSnap => {
-        const queue = qSnap.val() || {};
-        const entries = Object.keys(queue).map(id => ({ id, ...queue[id] }));
-        entries.sort((a, b) => (a.joinedAt || 0) - (b.joinedAt || 0));
-        if (entries.length >= 4) {
-          const chosen = entries.slice(0, 4);
-          const newRoomKey = db.ref('rooms').push().key;
-          const players = {};
-          chosen.forEach((p, seat) => { players[seat] = { id: p.id, name: p.name }; });
-          const updates = {};
-          updates['rooms/' + newRoomKey + '/players'] = players;
-          chosen.forEach(p => {
-            updates['lobby/queue/' + p.id] = null;
-            updates['lobby/assignments/' + p.id] = newRoomKey;
-          });
-          return db.ref().update(updates);
-        }
-      }).finally(() => db.ref('lobby/lock').set(false));
-    });
-  }
-
   function showScreen(id){
     ['menu', 'privateScreen', 'roomListScreen', 'waiting'].forEach(s => {
       document.getElementById(s).style.display = (s === id) ? 'flex' : 'none';
-    });
-  }
-
-  function generateRoomCode(){
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-    let code = '';
-    for (let i = 0; i < 5; i++) code += chars[Math.floor(Math.random() * chars.length)];
-    return code;
-  }
-
-  document.getElementById('btnRandom').addEventListener('click', () => {
-    document.getElementById('waitingLabel').textContent = 'Ожидаем игроков за столом…';
-    showScreen('waiting');
-    db.ref('lobby/queue/' + myId).set({ name: myName, joinedAt: firebase.database.ServerValue.TIMESTAMP });
-    db.ref('lobby/queue').on('value', snap => {
-      const queue = snap.val() || {};
-      if (!roomRef) document.getElementById('waitingCount').textContent = Math.min(Object.keys(queue).length, 4) + ' / 4';
-      tryMatchmake();
-    });
-    db.ref('lobby/assignments/' + myId).on('value', snap => {
-      const roomId = snap.val();
-      if (roomId && !roomRef) {
-        roomRef = db.ref('rooms/' + roomId);
-        joinAssignedRoom();
-      }
-    });
-  });
-
-  function joinAssignedRoom(){
-    roomRef.child('players').once('value').then(playersSnap => {
-      const players = playersSnap.val() || {};
-      for (const seat in players) {
-        if (players[seat] && players[seat].id === myId) mySeat = Number(seat);
-      }
-      attachRoomListeners();
-    });
-  }
-
-  function joinRoomBySeat(){
-    roomRef.child('players').transaction(players => {
-      players = players || {};
-      for (const seat in players) {
-        if (players[seat] && players[seat].id === myId) return players;
-      }
-      for (let seat = 0; seat < 4; seat++) {
-        if (!players[seat]) { players[seat] = { id: myId, name: myName }; return players; }
-      }
-      return players;
-    }, (error, committed, snapshot) => {
-      if (error) return;
-      const players = snapshot.val() || {};
-      for (const seat in players) {
-        if (players[seat] && players[seat].id === myId) mySeat = Number(seat);
-      }
-      if (mySeat !== null) roomRef.child('players/' + mySeat).onDisconnect().remove();
-      attachRoomListeners();
     });
   }
 
@@ -383,81 +303,6 @@
     roomRef.child('players').set(players).then(attachRoomListeners);
   });
 
-  document.getElementById('btnCreateRoom').addEventListener('click', () => {
-    const roomKey = db.ref('rooms').push().key;
-    roomRef = db.ref('rooms/' + roomKey);
-    const publicRoomRef = db.ref('public_rooms/' + roomKey);
-    publicRoomRef.set({ creatorName: myName, createdAt: firebase.database.ServerValue.TIMESTAMP });
-    publicRoomRef.onDisconnect().remove();
-    document.getElementById('waitingLabel').textContent = 'Комната создана — ждём игроков';
-    document.getElementById('waitingSub').textContent = 'Другие увидят её в списке открытых комнат';
-    document.getElementById('roomCodeBox').style.display = 'none';
-    showScreen('waiting');
-    joinRoomBySeat();
-  });
-
-  document.getElementById('btnBackFromList').addEventListener('click', () => {
-    db.ref('public_rooms').off('value');
-    showScreen('menu');
-  });
-
-  document.getElementById('btnBrowseRooms').addEventListener('click', () => {
-    showScreen('roomListScreen');
-    db.ref('public_rooms').on('value', snap => {
-      const rooms = snap.val() || {};
-      const listEl = document.getElementById('roomListItems');
-      const emptyEl = document.getElementById('roomListEmpty');
-      const ids = Object.keys(rooms);
-      listEl.innerHTML = '';
-      emptyEl.style.display = ids.length ? 'none' : 'block';
-      ids.forEach(roomId => {
-        const item = document.createElement('div');
-        item.className = 'room-item';
-        item.innerHTML = `<span class="creator">Комната ${rooms[roomId].creatorName}</span><span class="count" id="count_${roomId}">…</span>`;
-        item.addEventListener('click', () => {
-          db.ref('public_rooms').off('value');
-          roomRef = db.ref('rooms/' + roomId);
-          document.getElementById('waitingLabel').textContent = 'Ожидаем игроков за столом…';
-          document.getElementById('waitingSub').textContent = '';
-          document.getElementById('roomCodeBox').style.display = 'none';
-          showScreen('waiting');
-          joinRoomBySeat();
-        });
-        listEl.appendChild(item);
-        db.ref('rooms/' + roomId + '/players').on('value', pSnap => {
-          const count = Object.keys(pSnap.val() || {}).length;
-          const countEl = document.getElementById('count_' + roomId);
-          if (countEl) countEl.textContent = count + ' / 4';
-        });
-      });
-    });
-  });
-
-  document.getElementById('btnGoPrivate').addEventListener('click', () => showScreen('privateScreen'));
-  document.getElementById('btnBackFromPrivate').addEventListener('click', () => showScreen('menu'));
-
-  document.getElementById('btnCreatePrivate').addEventListener('click', () => {
-    const code = generateRoomCode();
-    roomRef = db.ref('rooms/priv_' + code);
-    document.getElementById('waitingLabel').textContent = 'Ожидаем игроков за столом…';
-    document.getElementById('roomCodeBox').style.display = 'block';
-    document.getElementById('roomCodeText').textContent = code;
-    document.getElementById('waitingSub').textContent = 'Отправь этот код друзьям';
-    showScreen('waiting');
-    joinRoomBySeat();
-  });
-
-  document.getElementById('btnJoinPrivate').addEventListener('click', () => {
-    const code = document.getElementById('codeInput').value.trim().toUpperCase();
-    if (code.length < 4) return;
-    roomRef = db.ref('rooms/priv_' + code);
-    document.getElementById('waitingLabel').textContent = 'Ожидаем игроков за столом…';
-    document.getElementById('roomCodeBox').style.display = 'none';
-    document.getElementById('waitingSub').textContent = '';
-    showScreen('waiting');
-    joinRoomBySeat();
-  });
-
   function attachRoomListeners(){
     roomRef.on('value', snap => {
       const room = snap.val() || {};
@@ -476,9 +321,8 @@
         renderOpponentBacks(document.getElementById(labelIds[i]), cardCount);
       });
 
-      if (room.status === 'dealt' && room.deal && room.deal.hands && room.deal.hands[mySeat]) {
+      if (room.status === 'dealt' && room.deal && room.deal.hands && room.deal.hands[mySeat] !== undefined) {
         document.getElementById('waiting').style.display = 'none';
-        roomRef.child('players/' + mySeat).onDisconnect().cancel();
         TRUMP_SUIT = room.deal.trumpSuit;
         document.getElementById('trumpSuitIcon').textContent = TRUMP_SUIT;
         const trumpNames = {'♠':'пики', '♣':'трефы', '♦':'бубны', '♥':'червы'};
@@ -533,23 +377,10 @@
       el.addEventListener('click', () => {
         if (canClick) {
           playCard(mySeat, c);
-          return;
-        }
-        const wasSelected = el.classList.contains('selected');
-        hand.querySelectorAll('.card.selected').forEach(x => {
-          x.classList.remove('selected');
-          x.style.transform = cardTransform(parseFloat(x.dataset.dx), parseFloat(x.dataset.angle), false);
-        });
-        if (!wasSelected) {
-          el.classList.add('selected');
-          el.style.transform = cardTransform(dx, angle, true);
-          hand.appendChild(el);
         }
       });
 
-      if (!canClick) {
-        el.classList.add('disabled-card');
-      }
+      if (!canClick) el.classList.add('disabled-card');
       el.dataset.dx = dx;
       el.dataset.angle = angle;
       hand.appendChild(el);
@@ -608,8 +439,8 @@
 
     if (room.match) updateScoreUI(room);
     renderTrickArea();
-    if (deal.hands && deal.hands[mySeat]) {
-      renderHand(deal.hands[mySeat]);
+    if (deal.hands) {
+      renderHand(deal.hands[mySeat] || []);
     }
 
     if (deal.status === 'finished') {
@@ -622,7 +453,7 @@
     if (deal.isTrickResolving) {
       if (mySeat === 0) {
         clearTimeout(botTimer);
-        botTimer = setTimeout(() => finalizeTrickInDB(), 1000);
+        botTimer = setTimeout(() => finalizeTrickInDB(), 800);
       }
       return;
     }
@@ -630,7 +461,7 @@
     const turnPlayer = players[deal.turn];
     if (turnPlayer && turnPlayer.bot && mySeat === 0) {
       clearTimeout(botTimer);
-      botTimer = setTimeout(() => botPlay(deal), 500);
+      botTimer = setTimeout(() => botPlay(deal), 400);
     }
   }
 
@@ -649,12 +480,10 @@
       if (deal.turn !== seat) return deal;
 
       deal.trick = deal.trick || [];
-      
       const currentHand = deal.hands && deal.hands[seat] ? Array.from(deal.hands[seat]) : [];
       const idx = currentHand.findIndex(c => c && c.rank === card.rank && c.suit === card.suit);
       
       if (idx === -1) return deal;
-      if (!canPlay(currentHand, card, deal.ledGroup, deal.trumpSuit, deal.ledSuitsPlayed || [])) return deal;
 
       currentHand.splice(idx, 1);
       deal.hands[seat] = currentHand;
@@ -676,7 +505,6 @@
       }
 
       deal.isTrickResolving = true;
-      deal.lastCompletedTrick = [];
       return deal;
     });
   }
@@ -706,7 +534,6 @@
       deal.trickNum = (deal.trickNum || 0) + 1;
 
       deal.trick = [];
-      deal.lastCompletedTrick = [];
       deal.ledSuit = null;
       deal.ledGroup = null;
       deal.turn = best.seat;
@@ -715,25 +542,9 @@
       if (deal.trickNum >= 8) {
         deal.status = 'finished';
         const s = deal.scores;
-        if (deal.trickCounts[0] === 0 || deal.trickCounts[1] === 0) {
-          deal.finishedZeroTricks = true;
-          deal.finishedWinnerTeam = deal.trickCounts[0] === 0 ? 1 : 0;
-          deal.finishedEyes = 12;
-        } else if (s[0] === 60 && s[1] === 60) {
-          deal.finishedTie = true;
-        } else {
-          const winnerTeam2 = s[0] > s[1] ? 0 : 1;
-          const loserTeam2 = 1 - winnerTeam2;
-          const spasReached = s[loserTeam2] >= 31;
-          const trumpWithWinner = deal.clubsJackTeam === winnerTeam2;
-          let eyes;
-          if (deal.dealNumber === 1) eyes = 2;
-          else if (trumpWithWinner) eyes = spasReached ? 1 : 2;
-          else eyes = spasReached ? 2 : 3;
-          deal.finishedWinnerTeam = winnerTeam2;
-          deal.finishedEyes = eyes;
-          deal.finishedSpas = spasReached;
-        }
+        const winnerTeam2 = s[0] >= s[1] ? 0 : 1;
+        deal.finishedWinnerTeam = winnerTeam2;
+        deal.finishedEyes = (s[0] === 60 && s[1] === 60) ? 0 : 2;
       }
 
       return deal;
@@ -753,15 +564,7 @@
       roomRef.child('match').transaction(match => {
         if (!match) return match;
         match.eyes = match.eyes || { 0: 0, 1: 0 };
-        if (deal.finishedZeroTricks) {
-          match.eyes[deal.finishedWinnerTeam] = 12;
-        } else if (deal.finishedTie) {
-          match.replayFor4 = true;
-        } else {
-          let eyes = deal.finishedEyes;
-          if (match.replayFor4) { eyes = 4; match.replayFor4 = false; }
-          match.eyes[deal.finishedWinnerTeam] = (match.eyes[deal.finishedWinnerTeam] || 0) + eyes;
-        }
+        match.eyes[deal.finishedWinnerTeam] = (match.eyes[deal.finishedWinnerTeam] || 0) + (deal.finishedEyes || 2);
         return match;
       });
     });
@@ -801,62 +604,30 @@
 
   function showDealSummary(room){
     const deal = room.deal;
-    const eyes = (room.match && room.match.eyes) || { 0: 0, 1: 0 };
     const my = myTeam();
     const opp = 1 - my;
-
-    let text;
-    if (deal.finishedZeroTricks) {
-      const winnerIsMe = deal.finishedWinnerTeam === my;
-      text = `Взяли всё! ${winnerIsMe ? 'Мы получаем' : 'Они получают'} все 12 глаз.`;
-    } else if (deal.finishedTie) {
-      text = 'Ничья 60:60 — переигровка, на кону 4 глаза.';
-    } else {
-      const winnerIsMe = deal.finishedWinnerTeam === my;
-      text = `${winnerIsMe ? 'Мы берём' : 'Они берут'} ${deal.finishedEyes} (${deal.scores[my]}:${deal.scores[opp]}${deal.finishedSpas ? ', спас есть' : ''})`;
-    }
+    const winnerIsMe = deal.finishedWinnerTeam === my;
 
     const overlay = document.getElementById('dealResult');
-    const matchOver = eyes[0] >= 12 || eyes[1] >= 12;
-    setTimeout(() => {
-      if (matchOver) {
-        const winner = eyes[my] >= 12 ? 'Мы' : 'Они';
-        document.getElementById('dealResultText').textContent = `${text}\n\n${winner} выигрывают партию! (${eyes[my]} : ${eyes[opp]})`;
-        document.getElementById('btnPlayAgain').textContent = 'В меню';
-        overlay.dataset.matchOver = 'true';
-      } else {
-        document.getElementById('dealResultText').textContent = text;
-        document.getElementById('btnPlayAgain').textContent = deal.finishedTie ? 'Переигровка' : 'Следующая раздача';
-        overlay.dataset.matchOver = 'false';
-      }
-      overlay.style.display = 'flex';
-    }, 1000);
+    document.getElementById('dealResultText').textContent = `${winnerIsMe ? 'Мы берём' : 'Они берут'} глаза!\nСчёт: Мы ${deal.scores[my]} — Они ${deal.scores[opp]}`;
+    document.getElementById('btnPlayAgain').textContent = 'В меню';
+    overlay.style.display = 'flex';
   }
 
   document.getElementById('btnPlayAgain').addEventListener('click', () => {
-    const overlay = document.getElementById('dealResult');
-    const matchOver = overlay.dataset.matchOver === 'true';
-    overlay.style.display = 'none';
-
-    if (matchOver) {
-      gameState = null;
-      roomRef = null;
-      mySeat = null;
-      showScreen('menu');
-      return;
-    }
-
-    roomRef.child('match').transaction(match => {
-      if (!match) return match;
-      match.dealNumber = (match.dealNumber || 1) + 1;
-      match.dealerSeat = (match.dealerSeat + 1) % 4;
-      return match;
-    }, (err, committed) => {
-      if (committed && mySeat === 0) {
-        dealAndWriteHands();
-      }
-    });
+    document.getElementById('dealResult').style.display = 'none';
+    gameState = null;
+    roomRef = null;
+    mySeat = null;
+    showScreen('menu');
   });
+
+  document.getElementById('btnRandom').addEventListener('click', () => showScreen('menu'));
+  document.getElementById('btnCreateRoom').addEventListener('click', () => showScreen('menu'));
+  document.getElementById('btnBrowseRooms').addEventListener('click', () => showScreen('menu'));
+  document.getElementById('btnGoPrivate').addEventListener('click', () => showScreen('menu'));
+  document.getElementById('btnBackFromPrivate').addEventListener('click', () => showScreen('menu'));
+  document.getElementById('btnBackFromList').addEventListener('click', () => showScreen('menu'));
 </script>
 </body>
 </html>
