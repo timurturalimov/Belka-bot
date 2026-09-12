@@ -640,24 +640,31 @@
     playCard(seat, card);
   }
 
-  function playCard(seat, card){
+  function playCard(seat, card) {
     roomRef.child('deal').transaction(deal => {
       if (!deal || deal.status === 'finished' || deal.isTrickResolving) return deal;
       if (deal.turn !== seat) return deal;
+
       deal.trick = deal.trick || [];
-      const hand = deal.hands[seat];
-
-      const idx = hand.findIndex(c => c.rank === card.rank && c.suit === card.suit);
+      
+      const currentHand = deal.hands && deal.hands[seat] ? Array.from(deal.hands[seat]) : [];
+      const idx = currentHand.findIndex(c => c && c.rank === card.rank && c.suit === card.suit);
+      
       if (idx === -1) return deal;
-      if (!canPlay(hand, card, deal.ledGroup, deal.trumpSuit, deal.ledSuitsPlayed || [])) return deal;
+      if (!canPlay(currentHand, card, deal.ledGroup, deal.trumpSuit, deal.ledSuitsPlayed || [])) return deal;
 
-      hand.splice(idx, 1);
+      currentHand.splice(idx, 1);
+      deal.hands[seat] = currentHand;
+
       if (deal.trick.length === 0) {
         deal.ledSuit = (card.rank === 'J') ? null : card.suit;
         deal.ledGroup = effectiveGroup(card, deal.trumpSuit);
         deal.ledSuitsPlayed = deal.ledSuitsPlayed || [];
-        if (card.rank !== 'J' && !deal.ledSuitsPlayed.includes(card.suit)) deal.ledSuitsPlayed.push(card.suit);
+        if (card.rank !== 'J' && !deal.ledSuitsPlayed.includes(card.suit)) {
+          deal.ledSuitsPlayed.push(card.suit);
+        }
       }
+      
       deal.trick.push({ seat, card });
 
       if (deal.trick.length < 4) {
@@ -671,7 +678,7 @@
     });
   }
 
-  function finalizeTrickInDB(){
+  function finalizeTrickInDB() {
     roomRef.child('deal').transaction(deal => {
       if (!deal || !deal.isTrickResolving) return deal;
 
@@ -679,15 +686,30 @@
       let bestPower = trickCardPower(best.card, deal.ledSuit, deal.trumpSuit);
       for (let i = 1; i < 4; i++) {
         const p = trickCardPower(deal.trick[i].card, deal.ledSuit, deal.trumpSuit);
-        if (p > bestPower) { bestPower = p; best = deal.trick[i]; }
+        if (p > bestPower) { 
+          bestPower = p; 
+          best = deal.trick[i]; 
+        }
       }
+
       const points = deal.trick.reduce((sum, t) => sum + cardPoints(t.card), 0);
       const winnerTeam = best.seat % 2;
+      
+      deal.scores = deal.scores || { 0: 0, 1: 0 };
+      deal.trickCounts = deal.trickCounts || { 0: 0, 1: 0 };
+      
       deal.scores[winnerTeam] = (deal.scores[winnerTeam] || 0) + points;
       deal.trickCounts[winnerTeam] = (deal.trickCounts[winnerTeam] || 0) + 1;
       deal.trickNum = (deal.trickNum || 0) + 1;
 
-      if (deal.trickNum === 8) {
+      deal.lastCompletedTrick = deal.trick.slice();
+      deal.trick = [];
+      deal.ledSuit = null;
+      deal.ledGroup = null;
+      deal.turn = best.seat;
+      deal.isTrickResolving = false;
+
+      if (deal.trickNum >= 8) {
         deal.status = 'finished';
         const s = deal.scores;
         if (deal.trickCounts[0] === 0 || deal.trickCounts[1] === 0) {
@@ -711,12 +733,6 @@
         }
       }
 
-      deal.lastCompletedTrick = deal.trick.slice();
-      deal.trick = [];
-      deal.ledSuit = null;
-      deal.ledGroup = null;
-      deal.turn = best.seat;
-      deal.isTrickResolving = false;
       return deal;
     }, () => {
       if (mySeat === 0) applyDealResultIfNeeded();
