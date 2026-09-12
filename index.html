@@ -285,6 +285,7 @@
   <div class="count" id="dealResultText" style="font-size:22px; white-space:pre-line;">Мы: 0 — Они: 0</div>
   <button class="menu-btn" id="btnPlayAgain">В меню</button>
 </div>
+
 <script>
   const tg = window.Telegram && window.Telegram.WebApp;
   if (tg) { tg.ready(); tg.expand(); }
@@ -331,10 +332,9 @@
     return deck;
   }
 
-  // ---------------- Раздача: теперь пишет ОБЩЕЕ состояние стола в Firebase ----------------
   function dealAndWriteHands(){
     roomRef.child('match').once('value').then(matchSnap => {
-      let match = matchSnap.val() || { dealNumber: 1, dealerSeat: 0, personalSuit: null, eyes: { 0: 0, 1: 0 } };
+      let match = matchSnap.val() || { dealNumber: 1, dealerSeat: 0, personalSuit: {}, eyes: { 0: 0, 1: 0 } };
 
       const deck = buildShuffledDeck();
       const hands = [[], [], [], []];
@@ -354,7 +354,7 @@
         match.personalSuit[(clubsJackSeat + 2) % 4] = '♠';
         match.personalSuit[(clubsJackSeat + 3) % 4] = '♦';
       } else {
-        trumpSuit = match.personalSuit[clubsJackSeat];
+        trumpSuit = match.personalSuit[clubsJackSeat] || '♣';
       }
 
       const deal = {
@@ -379,7 +379,6 @@
     });
   }
 
-  // ---------------- Matchmaking (без изменений) ----------------
   function tryMatchmake(){
     db.ref('lobby/lock').transaction(locked => locked ? undefined : true, (error, committed) => {
       if (error || !committed) return;
@@ -580,7 +579,8 @@
         const p = players[seat];
         const labelEl = document.querySelector('#' + labelIds[i]).parentElement.querySelector('.opp-label');
         labelEl.textContent = p ? p.name : 'Ожидание…';
-        renderOpponentBacks(document.getElementById(labelIds[i]), p ? 8 : 0);
+        const cardCount = (room.deal && room.deal.hands && room.deal.hands[seat]) ? room.deal.hands[seat].length : (p ? 8 : 0);
+        renderOpponentBacks(document.getElementById(labelIds[i]), cardCount);
       });
 
       if (room.status === 'dealt' && room.deal && room.deal.hands && room.deal.hands[mySeat]) {
@@ -605,6 +605,7 @@
       el.appendChild(d);
     }
   }
+
   const CARD_W = 58;
 
   function cardTransform(dx, angle, lifted){
@@ -615,6 +616,7 @@
   function renderHand(cards){
     const hand = document.getElementById('hand');
     hand.innerHTML = '';
+    if (!cards) return;
     const n = cards.length;
     if (n === 0) return;
 
@@ -669,7 +671,7 @@
   let lastRenderedHand = [];
   const _renderHand = renderHand;
   renderHand = function(cards){ lastRenderedHand = cards; _renderHand(cards); };
-  window.addEventListener('resize', () => { if (lastRenderedHand.length) _renderHand(lastRenderedHand); });
+  window.addEventListener('resize', () => { if (lastRenderedHand && lastRenderedHand.length) _renderHand(lastRenderedHand); });
 
   let gameState = null;
   let dealVersionSeen = null;
@@ -689,20 +691,29 @@
 
   function isTrump(card, trumpSuit){ return card.rank === 'J' || card.suit === trumpSuit; }
   function effectiveGroup(card, trumpSuit){ return isTrump(card, trumpSuit) ? 'TRUMP' : card.suit; }
-  function hasGroup(hand, group, trumpSuit){ return hand.some(c => effectiveGroup(c, trumpSuit) === group); }
 
-    function legalCardsForHand(hand, ledGroup, trumpSuit, ledSuitsPlayed){
+  // ---------------- ИСПРАВЛЕННАЯ ЛОГИКА ПРОВЕРКИ ТУЗОВ И КОЗЫРЕЙ ----------------
+  function legalCardsForHand(hand, ledGroup, trumpSuit, ledSuitsPlayed) {
     if (!ledGroup) return hand.slice();
 
     const sameGroup = hand.filter(c => effectiveGroup(c, trumpSuit) === ledGroup);
     if (sameGroup.length > 0) return sameGroup;
 
     const trumps = hand.filter(c => effectiveGroup(c, trumpSuit) === 'TRUMP');
-    const freeDiscards = hand.filter(c =>
-      effectiveGroup(c, trumpSuit) !== 'TRUMP' &&
-      !(c.rank === 'A' && !(ledSuitsPlayed || []).includes(c.suit))
-    );
-    const allowed = trumps.concat(freeDiscards);
+
+    const validDiscards = hand.filter(c => {
+      if (effectiveGroup(c, trumpSuit) === 'TRUMP') return false; 
+
+      const suitPlayed = (ledSuitsPlayed || []).includes(c.suit);
+      const countInSuit = hand.filter(x => x.suit === c.suit).length;
+
+      if (c.rank === 'A' && !suitPlayed && countInSuit > 1) {
+        return false; 
+      }
+      return true;
+    });
+
+    const allowed = trumps.concat(validDiscards);
     return allowed.length > 0 ? allowed : hand.slice();
   }
 
@@ -711,22 +722,22 @@
     return legal.some(c => c.suit === card.suit && c.rank === card.rank);
   }
 
-
   function isCardLegal(card){
-    if (!gameState) return true;
+    if (!gameState || !gameState.hands || !gameState.hands[mySeat]) return true;
     return canPlay(gameState.hands[mySeat], card, gameState.ledGroup, gameState.trumpSuit, gameState.ledSuitsPlayed);
   }
 
   function myTeam(){ return mySeat % 2; }
 
-  // ---------------- Синхронизация состояния стола из Firebase ----------------
   function syncDealState(room, players){
     const deal = room.deal;
     gameState = deal;
 
     if (room.match) updateScoreUI(room);
     renderTrickArea();
-    renderHand(deal.hands[mySeat]);
+    if (deal.hands && deal.hands[mySeat]) {
+      renderHand(deal.hands[mySeat]);
+    }
 
     if (deal.status === 'finished') {
       showDealSummary(room);
@@ -737,33 +748,29 @@
 
     const turnPlayer = players[deal.turn];
     if (turnPlayer && turnPlayer.bot && mySeat === 0) {
-
-        const stamp = deal.turn + ':' + (deal.trick || []).length + ':' + deal.trickNum;
-
-
+      const stamp = deal.turn + ':' + (deal.trick || []).length + ':' + deal.trickNum;
       if (dealVersionSeen !== stamp) {
         dealVersionSeen = stamp;
-        setTimeout(() => botPlay(deal), 600 + Math.random() * 500);
+        setTimeout(() => botPlay(deal), 600 + Math.random() * 400);
       }
     }
   }
 
-    function botPlay(deal){
+  function botPlay(deal){
     const seat = deal.turn;
     const hand = deal.hands[seat];
+    if (!hand || hand.length === 0) return;
     const options = legalCardsForHand(hand, deal.ledGroup, deal.trumpSuit, deal.ledSuitsPlayed);
     const card = options[Math.floor(Math.random() * options.length)];
     playCard(seat, card);
   }
 
-
-  // ---------------- Ход картой — атомарная транзакция в Firebase ----------------
   function playCard(seat, card){
     roomRef.child('deal').transaction(deal => {
-  if (!deal || deal.status === 'finished') return deal;
-  if (deal.turn !== seat) return deal;
-  deal.trick = deal.trick || [];
-  const hand = deal.hands[seat];
+      if (!deal || deal.status === 'finished') return deal;
+      if (deal.turn !== seat) return deal;
+      deal.trick = deal.trick || [];
+      const hand = deal.hands[seat];
 
       const idx = hand.findIndex(c => c.rank === card.rank && c.suit === card.suit);
       if (idx === -1) return deal;
@@ -794,10 +801,6 @@
       deal.scores[winnerTeam] = (deal.scores[winnerTeam] || 0) + points;
       deal.trickCounts[winnerTeam] = (deal.trickCounts[winnerTeam] || 0) + 1;
       deal.trickNum = (deal.trickNum || 0) + 1;
-      deal.trick = [];
-      deal.ledSuit = null;
-      deal.ledGroup = null;
-      deal.turn = best.seat;
 
       if (deal.trickNum === 8) {
         deal.status = 'finished';
@@ -821,6 +824,11 @@
           deal.finishedEyes = eyes;
           deal.finishedSpas = spasReached;
         }
+      } else {
+        deal.trick = [];
+        deal.ledSuit = null;
+        deal.ledGroup = null;
+        deal.turn = best.seat;
       }
       return deal;
     }, () => {
@@ -828,7 +836,6 @@
     });
   }
 
-  // ---------------- Начисление глаз в общий счёт матча (делает только хост, один раз) ----------------
   function applyDealResultIfNeeded(){
     roomRef.child('deal').transaction(deal => {
       if (!deal || deal.status !== 'finished' || deal.eyesApplied) return deal;
@@ -902,17 +909,19 @@
 
     const overlay = document.getElementById('dealResult');
     const matchOver = eyes[0] >= 12 || eyes[1] >= 12;
-    if (matchOver) {
-      const winner = eyes[my] >= 12 ? 'Мы' : 'Они';
-      document.getElementById('dealResultText').textContent = `${text}\n\n${winner} выигрывают партию! (${eyes[my]} : ${eyes[opp]})`;
-      document.getElementById('btnPlayAgain').textContent = 'В меню';
-      overlay.dataset.matchOver = 'true';
-    } else {
-      document.getElementById('dealResultText').textContent = text;
-      document.getElementById('btnPlayAgain').textContent = deal.finishedTie ? 'Переигровка' : 'Следующая раздача';
-      overlay.dataset.matchOver = 'false';
-    }
-    overlay.style.display = 'flex';
+    setTimeout(() => {
+      if (matchOver) {
+        const winner = eyes[my] >= 12 ? 'Мы' : 'Они';
+        document.getElementById('dealResultText').textContent = `${text}\n\n${winner} выигрывают партию! (${eyes[my]} : ${eyes[opp]})`;
+        document.getElementById('btnPlayAgain').textContent = 'В меню';
+        overlay.dataset.matchOver = 'true';
+      } else {
+        document.getElementById('dealResultText').textContent = text;
+        document.getElementById('btnPlayAgain').textContent = deal.finishedTie ? 'Переигровка' : 'Следующая раздача';
+        overlay.dataset.matchOver = 'false';
+      }
+      overlay.style.display = 'flex';
+    }, 1200);
   }
 
   document.getElementById('btnPlayAgain').addEventListener('click', () => {
@@ -929,17 +938,17 @@
       return;
     }
 
-    if (mySeat === 0) {
-      roomRef.child('match').transaction(match => {
-        if (!match) return match;
-        match.dealNumber = (match.dealNumber || 1) + 1;
-        match.dealerSeat = (match.dealerSeat + 1) % 4;
-        return match;
-      }, () => dealAndWriteHands());
-    }
+    roomRef.child('match').transaction(match => {
+      if (!match) return match;
+      match.dealNumber = (match.dealNumber || 1) + 1;
+      match.dealerSeat = (match.dealerSeat + 1) % 4;
+      return match;
+    }, (err, committed) => {
+      if (committed && mySeat === 0) {
+        dealAndWriteHands();
+      }
+    });
   });
 </script>
-
-
 </body>
 </html>
