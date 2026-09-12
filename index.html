@@ -322,6 +322,10 @@
   const RANKS = ['7','8','9','10','J','Q','K','A'];
   const SUIT_LIST = ['♠','♣','♦','♥'];
 
+  const RANK_ORDER = { '7':0, '8':1, '9':2, '10':3, 'Q':4, 'K':5, 'A':6 };
+  const JACK_ORDER = { '♦':0, '♥':1, '♠':2, '♣':3 }; // Валет крести — самый старший (3)
+  const CARD_POINTS = { '7':0, '8':0, '9':0, '10':10, 'Q':3, 'K':4, 'A':11, 'J':2 };
+
   function buildShuffledDeck(){
     const deck = [];
     for (const s of SUIT_LIST) for (const r of RANKS) deck.push({rank:r, suit:s});
@@ -330,6 +334,35 @@
       [deck[i], deck[j]] = [deck[j], deck[i]];
     }
     return deck;
+  }
+
+  // Функция сортировки карт в руке: простая масть -> козырная масть -> валеты
+  function sortHand(hand, trumpSuit) {
+    const suitOrder = { '♠': 0, '♣': 1, '♦': 2, '♥': 3 };
+    return hand.slice().sort((a, b) => {
+      const aIsTrump = a.rank === 'J' || a.suit === trumpSuit;
+      const bIsTrump = b.rank === 'J' || b.suit === trumpSuit;
+
+      if (aIsTrump && !bIsTrump) return 1;
+      if (!aIsTrump && bIsTrump) return -1;
+
+      if (!aIsTrump && !bIsTrump) {
+        if (a.suit !== b.suit) return suitOrder[a.suit] - suitOrder[b.suit];
+        return RANK_ORDER[a.rank] - RANK_ORDER[b.rank];
+      }
+
+      const aIsJack = a.rank === 'J';
+      const bIsJack = b.rank === 'J';
+
+      if (aIsJack && !bIsJack) return 1;
+      if (!aIsJack && bIsJack) return -1;
+
+      if (aIsJack && bIsJack) {
+        return JACK_ORDER[a.suit] - JACK_ORDER[b.suit];
+      }
+
+      return RANK_ORDER[a.rank] - RANK_ORDER[b.rank];
+    });
   }
 
   function dealAndWriteHands(){
@@ -355,6 +388,11 @@
         match.personalSuit[(clubsJackSeat + 3) % 4] = '♦';
       } else {
         trumpSuit = match.personalSuit[clubsJackSeat] || '♣';
+      }
+
+      // Сортируем карты перед записью в базу
+      for (let seat = 0; seat < 4; seat++) {
+        hands[seat] = sortHand(hands[seat], trumpSuit);
       }
 
       const deal = {
@@ -679,10 +717,6 @@
   let gameState = null;
   let dealVersionSeen = null;
 
-  const RANK_ORDER = { '7':0, '8':1, '9':2, '10':3, 'Q':4, 'K':5, 'A':6 };
-  const JACK_ORDER = { '♣':0, '♠':1, '♥':2, '♦':3 };
-  const CARD_POINTS = { '7':0, '8':0, '9':0, '10':10, 'Q':3, 'K':4, 'A':11, 'J':2 };
-
   function cardPoints(card){ return CARD_POINTS[card.rank]; }
 
   function trickCardPower(card, ledSuit, trumpSuit){
@@ -748,13 +782,13 @@
       document.getElementById('dealResult').style.display = 'none';
     }
 
-    // Если взятка зафиксирована на паузе перед сбросом — ходы заблокированы
+    // Взятка завершена, ждём 600 мс перед очисткой стола
     if (deal.isTrickResolving) {
       if (mySeat === 0) {
         const stamp = 'resolve:' + deal.trickNum;
         if (dealVersionSeen !== stamp) {
           dealVersionSeen = stamp;
-          setTimeout(() => finalizeTrickInDB(), 1100);
+          setTimeout(() => finalizeTrickInDB(), 600); // <-- ЗАДЕРЖКА 0.6 сек
         }
       }
       return;
@@ -765,7 +799,7 @@
       const stamp = deal.turn + ':' + (deal.trick || []).length + ':' + deal.trickNum;
       if (dealVersionSeen !== stamp) {
         dealVersionSeen = stamp;
-        setTimeout(() => botPlay(deal), 600 + Math.random() * 400);
+        setTimeout(() => botPlay(deal), 500 + Math.random() * 300);
       }
     }
   }
@@ -804,7 +838,6 @@
         return deal;
       }
 
-      // На столе сформировались 4 карты — переводим взятку в режим завершения (пауза 1 сек)
       deal.isTrickResolving = true;
       deal.lastCompletedTrick = deal.trick.slice();
       return deal;
