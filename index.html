@@ -879,6 +879,8 @@
           deal.finishedEyes = eyes;
           deal.finishedSpas = spasReached;
         }
+        deal.lastCompletedTrick = deal.trick.slice();
+        deal.trick = [];
       } else {
         deal.lastCompletedTrick = deal.trick.slice();
         deal.trick = [];
