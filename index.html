@@ -738,7 +738,8 @@
     const turnPlayer = players[deal.turn];
     if (turnPlayer && turnPlayer.bot && mySeat === 0) {
 
-  const stamp = deal.turn + ':' + (deal.trick || []).length + ':' + deal.trickNum;
+        const stamp = deal.turn + ':' + (deal.trick || []).length + ':' + deal.trickNum;
+
 
       if (dealVersionSeen !== stamp) {
         dealVersionSeen = stamp;
