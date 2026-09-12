@@ -691,15 +691,26 @@
   function effectiveGroup(card, trumpSuit){ return isTrump(card, trumpSuit) ? 'TRUMP' : card.suit; }
   function hasGroup(hand, group, trumpSuit){ return hand.some(c => effectiveGroup(c, trumpSuit) === group); }
 
-  function canPlay(hand, card, ledGroup, trumpSuit, ledSuitsPlayed){
-    if (!ledGroup) return true;
-    if (hasGroup(hand, ledGroup, trumpSuit)) {
-      return effectiveGroup(card, trumpSuit) === ledGroup;
-    }
-    if (effectiveGroup(card, trumpSuit) === 'TRUMP') return true;
-    if (card.rank === 'A' && !(ledSuitsPlayed || []).includes(card.suit)) return false;
-    return true;
+    function legalCardsForHand(hand, ledGroup, trumpSuit, ledSuitsPlayed){
+    if (!ledGroup) return hand.slice();
+
+    const sameGroup = hand.filter(c => effectiveGroup(c, trumpSuit) === ledGroup);
+    if (sameGroup.length > 0) return sameGroup;
+
+    const trumps = hand.filter(c => effectiveGroup(c, trumpSuit) === 'TRUMP');
+    const freeDiscards = hand.filter(c =>
+      effectiveGroup(c, trumpSuit) !== 'TRUMP' &&
+      !(c.rank === 'A' && !(ledSuitsPlayed || []).includes(c.suit))
+    );
+    const allowed = trumps.concat(freeDiscards);
+    return allowed.length > 0 ? allowed : hand.slice();
   }
+
+  function canPlay(hand, card, ledGroup, trumpSuit, ledSuitsPlayed){
+    const legal = legalCardsForHand(hand, ledGroup, trumpSuit, ledSuitsPlayed);
+    return legal.some(c => c.suit === card.suit && c.rank === card.rank);
+  }
+
 
   function isCardLegal(card){
     if (!gameState) return true;
@@ -734,13 +745,14 @@
     }
   }
 
-  function botPlay(deal){
+    function botPlay(deal){
     const seat = deal.turn;
     const hand = deal.hands[seat];
-    const options = hand.filter(c => canPlay(hand, c, deal.ledGroup, deal.trumpSuit, deal.ledSuitsPlayed));
+    const options = legalCardsForHand(hand, deal.ledGroup, deal.trumpSuit, deal.ledSuitsPlayed);
     const card = options[Math.floor(Math.random() * options.length)];
     playCard(seat, card);
   }
+
 
   // ---------------- Ход картой — атомарная транзакция в Firebase ----------------
   function playCard(seat, card){
