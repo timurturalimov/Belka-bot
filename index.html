@@ -323,7 +323,7 @@
   const SUIT_LIST = ['♠','♣','♦','♥'];
 
   const RANK_ORDER = { '7':0, '8':1, '9':2, '10':3, 'Q':4, 'K':5, 'A':6 };
-  const JACK_ORDER = { '♦':0, '♥':1, '♠':2, '♣':3 }; // Валет крести — самый старший (3)
+  const JACK_ORDER = { '♦':0, '♥':1, '♠':2, '♣':3 };
   const CARD_POINTS = { '7':0, '8':0, '9':0, '10':10, 'Q':3, 'K':4, 'A':11, 'J':2 };
 
   function buildShuffledDeck(){
@@ -336,7 +336,6 @@
     return deck;
   }
 
-  // Функция сортировки карт в руке: простая масть -> козырная масть -> валеты
   function sortHand(hand, trumpSuit) {
     const suitOrder = { '♠': 0, '♣': 1, '♦': 2, '♥': 3 };
     return hand.slice().sort((a, b) => {
@@ -390,7 +389,6 @@
         trumpSuit = match.personalSuit[clubsJackSeat] || '♣';
       }
 
-      // Сортируем карты перед записью в базу
       for (let seat = 0; seat < 4; seat++) {
         hands[seat] = sortHand(hands[seat], trumpSuit);
       }
@@ -782,13 +780,12 @@
       document.getElementById('dealResult').style.display = 'none';
     }
 
-    // Взятка завершена, ждём 600 мс перед очисткой стола
     if (deal.isTrickResolving) {
       if (mySeat === 0) {
         const stamp = 'resolve:' + deal.trickNum;
         if (dealVersionSeen !== stamp) {
           dealVersionSeen = stamp;
-          setTimeout(() => finalizeTrickInDB(), 600); // <-- ЗАДЕРЖКА 0.6 сек
+          setTimeout(() => finalizeTrickInDB(), 600);
         }
       }
       return;
@@ -883,6 +880,7 @@
           deal.finishedSpas = spasReached;
         }
       } else {
+        deal.lastCompletedTrick = deal.trick.slice();
         deal.trick = [];
         deal.ledSuit = null;
         deal.ledGroup = null;
@@ -892,6 +890,13 @@
       return deal;
     }, () => {
       if (mySeat === 0) applyDealResultIfNeeded();
+      
+      setTimeout(() => {
+        if (gameState) {
+          gameState.lastCompletedTrick = null;
+          renderTrickArea();
+        }
+      }, 800);
     });
   }
 
