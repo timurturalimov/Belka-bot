@@ -702,7 +702,9 @@
   let trickClearScheduledStamp = null;
 
   const RANK_ORDER = { '7':0, '8':1, '9':2, '10':3, 'Q':4, 'K':5, 'A':6 };
-  const JACK_ORDER = { '♣':0, '♠':1, '♥':2, '♦':3 };
+  // По возрастанию силы: ♦J слабейший ... ♣J сильнейший (было наоборот — из-за этого
+  // при столкновении двух валетов в одной взятке неправильно определялся победитель).
+  const JACK_ORDER = { '♦':0, '♥':1, '♠':2, '♣':3 };
   const CARD_POINTS = { '7':0, '8':0, '9':0, '10':10, 'Q':3, 'K':4, 'A':11, 'J':2 };
 
   function cardPoints(card){ return CARD_POINTS[card.rank]; }
@@ -717,6 +719,26 @@
   function isTrump(card, trumpSuit){ return card.rank === 'J' || card.suit === trumpSuit; }
   function effectiveGroup(card, trumpSuit){ return isTrump(card, trumpSuit) ? 'TRUMP' : card.suit; }
   function hasGroup(hand, group, trumpSuit){ return hand.some(c => effectiveGroup(c, trumpSuit) === group); }
+
+  // Сортировка руки для отображения: сначала три обычные масти по порядку 7→A,
+  // козырная группа (козырная масть + все валеты) всегда последней, внутри неё
+  // тоже по возрастанию силы — сначала козырные 7→A, затем валеты от слабого к сильному.
+  function sortHandForDisplay(cards, trumpSuit){
+    const nonTrumpSuits = SUIT_LIST.filter(s => s !== trumpSuit);
+    function groupIndex(c){
+      if (isTrump(c, trumpSuit)) return nonTrumpSuits.length;
+      return nonTrumpSuits.indexOf(c.suit);
+    }
+    function powerInGroup(c){
+      if (c.rank === 'J') return 100 + JACK_ORDER[c.suit];
+      return RANK_ORDER[c.rank];
+    }
+    return cards.slice().sort((a, b) => {
+      const ga = groupIndex(a), gb = groupIndex(b);
+      if (ga !== gb) return ga - gb;
+      return powerInGroup(a) - powerInGroup(b);
+    });
+  }
 
     function legalCardsForHand(hand, ledGroup, trumpSuit, ledSuitsPlayed){
     if (!ledGroup) return hand.slice();
@@ -756,7 +778,7 @@
 
     if (room.match) updateScoreUI(room);
     renderTrickArea();
-    renderHand((deal.hands && deal.hands[mySeat]) || []);
+    renderHand(sortHandForDisplay((deal.hands && deal.hands[mySeat]) || [], deal.trumpSuit));
 
     // Если взятка собрана (4 карты) и ждёт очистки — планируем её уборку со стола
     // с небольшой задержкой, чтобы все успели увидеть все 4 карты, включая последнюю.
@@ -771,7 +793,10 @@
 
     const turnPlayer = players[deal.turn];
     if (turnPlayer && turnPlayer.bot && mySeat === 0) {
-      const stamp = deal.turn + ':' + deal.trick.length + ':' + deal.trickNum;
+      // Firebase удаляет пустой массив trick из базы — читаем его длину защищённо,
+      // иначе здесь бросается необработанное исключение и бот никогда не получает
+      // команду сходить (игра "зависает, ожидая хода").
+      const stamp = deal.turn + ':' + (deal.trick ? deal.trick.length : 0) + ':' + deal.trickNum;
       if (dealVersionSeen !== stamp) {
         dealVersionSeen = stamp;
         setTimeout(() => botPlay(deal), 600 + Math.random() * 500);
@@ -799,13 +824,17 @@
       if (!hand) return deal;
       const idx = hand.findIndex(c => c.rank === card.rank && c.suit === card.suit);
       if (idx === -1) return deal;
-      if (!canPlay(hand, card, deal.ledGroup, deal.trumpSuit, deal.ledSuitsPlayed || [])) return deal;
+      // deal.trick и deal.ledSuitsPlayed могли быть удалены Firebase при обнулении
+      // (пустой массив там не хранится) — восстанавливаем их перед использованием,
+      // иначе .push()/.includes() ниже упадёт с ошибкой на пустом столе.
+      deal.trick = deal.trick || [];
+      deal.ledSuitsPlayed = deal.ledSuitsPlayed || [];
+      if (!canPlay(hand, card, deal.ledGroup, deal.trumpSuit, deal.ledSuitsPlayed)) return deal;
 
       hand.splice(idx, 1);
       if (deal.trick.length === 0) {
         deal.ledSuit = (card.rank === 'J') ? null : card.suit;
         deal.ledGroup = effectiveGroup(card, deal.trumpSuit);
-        deal.ledSuitsPlayed = deal.ledSuitsPlayed || [];
         if (card.rank !== 'J' && !deal.ledSuitsPlayed.includes(card.suit)) deal.ledSuitsPlayed.push(card.suit);
       }
       deal.trick.push({ seat, card });
