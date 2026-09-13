@@ -772,6 +772,100 @@
 
   function myTeam(){ return mySeat % 2; }
 
+  // ==================== ИИ ботов ====================
+  // Насколько "дёшево" отдать эту карту: сначала по игровым очкам (меньше очков —
+  // дешевле), потом по номинальной силе внутри своей группы (масть/козырь).
+  function rankWeight(c){
+    if (c.rank === 'J') return 100 + JACK_ORDER[c.suit];
+    return RANK_ORDER[c.rank];
+  }
+  function cardWeight(c){ return cardPoints(c) * 100 + rankWeight(c); }
+
+  function cheapestCard(cards){
+    return cards.slice().sort((a, b) => cardWeight(a) - cardWeight(b))[0];
+  }
+
+  function currentTrickLeader(deal){
+    const trick = deal.trick || [];
+    if (trick.length === 0) return null;
+    let best = trick[0];
+    let bestPower = trickCardPower(best.card, deal.ledSuit, deal.trumpSuit);
+    for (let i = 1; i < trick.length; i++) {
+      const p = trickCardPower(trick[i].card, deal.ledSuit, deal.trumpSuit);
+      if (p > bestPower) { bestPower = p; best = trick[i]; }
+    }
+    return { seat: best.seat, power: bestPower };
+  }
+
+  function trickPointsSoFar(deal){
+    return (deal.trick || []).reduce((sum, t) => sum + cardPoints(t.card), 0);
+  }
+
+  // Выбор карты для ПЕРВОГО хода в трюке.
+  function chooseLeadCard(legal, deal){
+    const trumpSuit = deal.trumpSuit;
+    const ledSuitsPlayed = deal.ledSuitsPlayed || [];
+
+    // 1) Свежий туз (ещё не козырь, масть ещё не разыгрывалась) — самое время его обналичить,
+    //    пока его позже не срезали козырем.
+    const freshAce = legal.find(c => c.rank !== 'J' && c.suit !== trumpSuit && c.rank === 'A' && !ledSuitsPlayed.includes(c.suit));
+    if (freshAce) return freshAce;
+
+    // 2) Ходим младшей картой самой длинной своей не козырной масти — так постепенно
+    //    выманиваем чужие козыри и берём контроль над столом.
+    const suitGroups = {};
+    legal.forEach(c => {
+      if (c.rank !== 'J' && c.suit !== trumpSuit) {
+        (suitGroups[c.suit] = suitGroups[c.suit] || []).push(c);
+      }
+    });
+    const suits = Object.keys(suitGroups);
+    if (suits.length > 0) {
+      suits.sort((a, b) => suitGroups[b].length - suitGroups[a].length);
+      const longest = suitGroups[suits[0]].slice().sort((a, b) => RANK_ORDER[a.rank] - RANK_ORDER[b.rank]);
+      return longest[0];
+    }
+
+    // 3) На руке остались только козыри/валеты — ходим самым слабым из них.
+    return cheapestCard(legal);
+  }
+
+  // Выбор карты, когда бот ОТВЕЧАЕТ на уже начатый трюк.
+  function chooseFollowCard(legal, deal, seat){
+    const leader = currentTrickLeader(deal);
+    const partnerWinning = (leader.seat % 2) === (seat % 2);
+    const pointsAtStake = trickPointsSoFar(deal);
+    const isLastTrick = deal.trickNum === 7; // трюк №8 ещё не сыгран — последний в раздаче
+
+    if (partnerWinning) {
+      // Партнёр уже забирает трюк — незачем тратить сильную карту, подкладываем дешёвую.
+      return cheapestCard(legal);
+    }
+
+    // Трюк сейчас у соперника — смотрим, можем ли и стоит ли его перебить.
+    const winningOptions = legal.filter(c => trickCardPower(c, deal.ledSuit, deal.trumpSuit) > leader.power);
+    if (winningOptions.length > 0 && (pointsAtStake > 0 || isLastTrick)) {
+      // Отбиваем минимально достаточной картой — экономим козыри и старшие карты.
+      return cheapestCard(winningOptions);
+    }
+
+    // Отбить нечем или невыгодно — скидываем самую дешёвую разрешённую карту
+    // (canPlay/legalCardsForHand уже не даст скинуть туза неразыгранной масти).
+    return cheapestCard(legal);
+  }
+
+  function chooseBotCard(deal, seat){
+    const hand = (deal.hands && deal.hands[seat]) || [];
+    const legal = legalCardsForHand(hand, deal.ledGroup, deal.trumpSuit, deal.ledSuitsPlayed);
+    if (legal.length === 0) return null;
+    if (legal.length === 1) return legal[0];
+
+    const trick = deal.trick || [];
+    return trick.length === 0
+      ? chooseLeadCard(legal, deal)
+      : chooseFollowCard(legal, deal, seat);
+  }
+
   // ---------------- Синхронизация состояния стола из Firebase ----------------
   function syncDealState(room, players){
     const deal = room.deal;
@@ -809,9 +903,8 @@
     const seat = deal.turn;
     const hand = (deal.hands && deal.hands[seat]) || [];
     if (hand.length === 0) return;
-    const options = legalCardsForHand(hand, deal.ledGroup, deal.trumpSuit, deal.ledSuitsPlayed);
-    if (!options.length) return;
-    const card = options[Math.floor(Math.random() * options.length)];
+    const card = chooseBotCard(deal, seat);
+    if (!card) return;
     playCard(seat, card);
   }
 
