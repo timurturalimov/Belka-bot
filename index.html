@@ -295,6 +295,9 @@
   };
   let TRUMP_SUIT = '♦';
 
+  // Сколько миллисекунд держим на столе все 4 карты взятки, прежде чем убрать их
+  const TRICK_REVEAL_DELAY_MS = 1100;
+
   const firebaseConfig = {
     apiKey: "AIzaSyC0vQ0YTBEj2-SeS5Iz0FnDCDTtDWsXMNY",
     authDomain: "belka-game-4a0fd.firebaseapp.com",
@@ -331,9 +334,13 @@
     return deck;
   }
 
-  // ---------------- Раздача: теперь пишет ОБЩЕЕ состояние стола в Firebase ----------------
+  // ---------------- Раздача: пишет ОБЩЕЕ состояние стола в Firebase ----------------
+  // ВАЖНО: обновляем поля match точечно (multi-path update), а не перезаписываем
+  // весь объект match целиком — иначе можно затереть match/eyes, если начисление
+  // глаз за прошлую раздачу (applyDealResultIfNeeded) ещё не успело примениться.
   function dealAndWriteHands(){
     roomRef.child('match').once('value').then(matchSnap => {
+      const existed = matchSnap.exists();
       let match = matchSnap.val() || { dealNumber: 1, dealerSeat: 0, personalSuit: null, eyes: { 0: 0, 1: 0 } };
 
       const deck = buildShuffledDeck();
@@ -374,7 +381,20 @@
         status: 'playing'
       };
 
-      roomRef.update({ match, deal, status: 'dealt' });
+      const updates = {
+        'match/dealNumber': match.dealNumber,
+        'match/dealerSeat': match.dealerSeat,
+        'match/personalSuit': match.personalSuit,
+        deal,
+        status: 'dealt'
+      };
+      // Поле eyes трогаем только при самом первом создании match, чтобы никогда
+      // не перезаписать уже накопленный счёт глаз при переходе к новой раздаче.
+      if (!existed) {
+        updates['match/eyes'] = match.eyes;
+      }
+
+      roomRef.update(updates);
       db.ref('public_rooms/' + roomRef.key).remove();
     });
   }
@@ -583,7 +603,11 @@
         renderOpponentBacks(document.getElementById(labelIds[i]), p ? 8 : 0);
       });
 
-      if (room.status === 'dealt' && room.deal && room.deal.hands && room.deal.hands[mySeat]) {
+      // ВАЖНО: раньше здесь стояла проверка room.deal.hands[mySeat], но Firebase
+      // удаляет из базы пустые массивы — как только чья-то рука опустошалась
+      // (конец раздачи), это условие переставало выполняться и игра "зависала".
+      // Теперь достаточно того, что объект deal вообще существует.
+      if (room.status === 'dealt' && room.deal) {
         document.getElementById('waiting').style.display = 'none';
         roomRef.child('players/' + mySeat).onDisconnect().cancel();
         TRUMP_SUIT = room.deal.trumpSuit;
@@ -673,6 +697,9 @@
 
   let gameState = null;
   let dealVersionSeen = null;
+  // Отслеживаем, для какой именно взятки уже запланирована задержка перед очисткой стола,
+  // чтобы не ставить несколько таймеров подряд на одну и ту же взятку.
+  let trickClearScheduledStamp = null;
 
   const RANK_ORDER = { '7':0, '8':1, '9':2, '10':3, 'Q':4, 'K':5, 'A':6 };
   const JACK_ORDER = { '♣':0, '♠':1, '♥':2, '♦':3 };
@@ -714,7 +741,10 @@
 
   function isCardLegal(card){
     if (!gameState) return true;
-    return canPlay(gameState.hands[mySeat], card, gameState.ledGroup, gameState.trumpSuit, gameState.ledSuitsPlayed);
+    // Рука может отсутствовать в снапшоте, если Firebase уже "схлопнул" пустой массив —
+    // в этом случае считаем руку пустой, а не падаем на undefined.
+    const myHand = (gameState.hands && gameState.hands[mySeat]) || [];
+    return canPlay(myHand, card, gameState.ledGroup, gameState.trumpSuit, gameState.ledSuitsPlayed);
   }
 
   function myTeam(){ return mySeat % 2; }
@@ -726,7 +756,11 @@
 
     if (room.match) updateScoreUI(room);
     renderTrickArea();
-    renderHand(deal.hands[mySeat]);
+    renderHand((deal.hands && deal.hands[mySeat]) || []);
+
+    // Если взятка собрана (4 карты) и ждёт очистки — планируем её уборку со стола
+    // с небольшой задержкой, чтобы все успели увидеть все 4 карты, включая последнюю.
+    scheduleTrickClear(deal);
 
     if (deal.status === 'finished') {
       showDealSummary(room);
@@ -747,8 +781,10 @@
 
     function botPlay(deal){
     const seat = deal.turn;
-    const hand = deal.hands[seat];
+    const hand = (deal.hands && deal.hands[seat]) || [];
+    if (hand.length === 0) return;
     const options = legalCardsForHand(hand, deal.ledGroup, deal.trumpSuit, deal.ledSuitsPlayed);
+    if (!options.length) return;
     const card = options[Math.floor(Math.random() * options.length)];
     playCard(seat, card);
   }
@@ -760,6 +796,7 @@
       if (!deal || deal.status === 'finished') return deal;
       if (deal.turn !== seat) return deal;
       const hand = deal.hands[seat];
+      if (!hand) return deal;
       const idx = hand.findIndex(c => c.rank === card.rank && c.suit === card.suit);
       if (idx === -1) return deal;
       if (!canPlay(hand, card, deal.ledGroup, deal.trumpSuit, deal.ledSuitsPlayed || [])) return deal;
@@ -778,6 +815,9 @@
         return deal;
       }
 
+      // Взятка собрана из 4 карт. Считаем победителя и очки сразу, но карты
+      // со стола НЕ убираем и ход дальше НЕ передаём — это делает clearTrick()
+      // спустя небольшую паузу, чтобы все успели увидеть все 4 карты на столе.
       let best = deal.trick[0];
       let bestPower = trickCardPower(best.card, deal.ledSuit, deal.trumpSuit);
       for (let i = 1; i < 4; i++) {
@@ -789,20 +829,18 @@
       deal.scores[winnerTeam] = (deal.scores[winnerTeam] || 0) + points;
       deal.trickCounts[winnerTeam] = (deal.trickCounts[winnerTeam] || 0) + 1;
       deal.trickNum = (deal.trickNum || 0) + 1;
-      deal.trick = [];
-      deal.ledSuit = null;
-      deal.ledGroup = null;
-      deal.turn = best.seat;
+      deal.pendingWinnerSeat = best.seat;
+      deal.turn = null; // блокируем ходы, пока карты не убраны со стола
 
       if (deal.trickNum === 8) {
-        deal.status = 'finished';
         const s = deal.scores;
+        const finishData = {};
         if (deal.trickCounts[0] === 0 || deal.trickCounts[1] === 0) {
-          deal.finishedZeroTricks = true;
-          deal.finishedWinnerTeam = deal.trickCounts[0] === 0 ? 1 : 0;
-          deal.finishedEyes = 12;
+          finishData.finishedZeroTricks = true;
+          finishData.finishedWinnerTeam = deal.trickCounts[0] === 0 ? 1 : 0;
+          finishData.finishedEyes = 12;
         } else if (s[0] === 60 && s[1] === 60) {
-          deal.finishedTie = true;
+          finishData.finishedTie = true;
         } else {
           const winnerTeam2 = s[0] > s[1] ? 0 : 1;
           const loserTeam2 = 1 - winnerTeam2;
@@ -812,10 +850,45 @@
           if (deal.dealNumber === 1) eyes = 2;
           else if (trumpWithWinner) eyes = spasReached ? 1 : 2;
           else eyes = spasReached ? 2 : 3;
-          deal.finishedWinnerTeam = winnerTeam2;
-          deal.finishedEyes = eyes;
-          deal.finishedSpas = spasReached;
+          finishData.finishedWinnerTeam = winnerTeam2;
+          finishData.finishedEyes = eyes;
+          finishData.finishedSpas = spasReached;
         }
+        deal.pendingFinish = true;
+        deal.pendingFinishData = finishData;
+      }
+
+      return deal;
+    });
+  }
+
+  // ---------------- Уборка взятки со стола после паузы на просмотр ----------------
+  function scheduleTrickClear(deal){
+    if (deal && deal.trick && deal.trick.length === 4 && deal.pendingWinnerSeat != null) {
+      const stamp = 'trick:' + deal.trickNum;
+      if (trickClearScheduledStamp !== stamp) {
+        trickClearScheduledStamp = stamp;
+        setTimeout(clearTrick, TRICK_REVEAL_DELAY_MS);
+      }
+    }
+  }
+
+  function clearTrick(){
+    roomRef.child('deal').transaction(deal => {
+      if (!deal) return deal;
+      if (!deal.trick || deal.trick.length !== 4 || deal.pendingWinnerSeat == null) return deal;
+      const winnerSeat = deal.pendingWinnerSeat;
+      deal.trick = [];
+      deal.ledSuit = null;
+      deal.ledGroup = null;
+      deal.pendingWinnerSeat = null;
+      if (deal.pendingFinish) {
+        deal.status = 'finished';
+        Object.assign(deal, deal.pendingFinishData || {});
+        deal.pendingFinish = null;
+        deal.pendingFinishData = null;
+      } else {
+        deal.turn = winnerSeat;
       }
       return deal;
     }, () => {
