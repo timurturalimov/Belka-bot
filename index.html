@@ -57,23 +57,31 @@
   }
   .score span.num{color:var(--gold); font-weight:600; margin-left:4px;}
   .opponents{
-    display:flex; justify-content:center; gap:56px;
+    display:flex; justify-content:space-between;
+    padding:0 8px;
     margin-top:6px;
+    gap:4px;
   }
-  .opp-hand{ display:flex; }
+  .opp-slot{
+    flex:1 1 0; min-width:0;
+    display:flex; flex-direction:column; align-items:center;
+  }
+  .opp-hand{ display:flex; justify-content:center; width:100%; overflow:hidden; }
   .back-card{
-    width:34px; height:48px;
-    margin-left:-16px;
-    border-radius:5px;
+    flex:0 0 auto;
+    width:22px; height:32px;
+    margin-left:-13px;
+    border-radius:4px;
     background:
-      repeating-linear-gradient(135deg, var(--gold-dim) 0 3px, #6e5620 3px 6px);
+      repeating-linear-gradient(135deg, var(--gold-dim) 0 2px, #6e5620 2px 4px);
     border:1px solid var(--gold-dim);
     box-shadow:0 2px 4px rgba(0,0,0,.4);
   }
   .back-card:first-child{margin-left:0;}
   .opp-label{
-    text-align:center; font-size:11px; color:var(--gold);
-    margin-top:4px; opacity:.85;
+    text-align:center; font-size:10px; color:var(--gold);
+    margin-top:3px; opacity:.85;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%;
   }
   .trick{
     flex:1;
@@ -255,15 +263,15 @@
   </div>
 
   <div class="opponents">
-    <div>
+    <div class="opp-slot">
       <div class="opp-hand" id="oppLeft"></div>
       <div class="opp-label">Айдос</div>
     </div>
-    <div>
+    <div class="opp-slot">
       <div class="opp-hand" id="oppTop"></div>
       <div class="opp-label">Динара</div>
     </div>
-    <div>
+    <div class="opp-slot">
       <div class="opp-hand" id="oppRight"></div>
       <div class="opp-label">Ержан</div>
     </div>
@@ -802,20 +810,40 @@
   }
 
   // Выбор карты для ПЕРВОГО хода в трюке.
-  function chooseLeadCard(legal, deal){
+  function chooseLeadCard(legal, deal, seat){
     const trumpSuit = deal.trumpSuit;
     const ledSuitsPlayed = deal.ledSuitsPlayed || [];
+    const voidSeats = deal.voidSeats || {};
+    const opponents = [(seat + 1) % 4, (seat + 3) % 4];
+    const trumpCount = legal.filter(c => isTrump(c, trumpSuit)).length;
+    const handSize = (deal.hands && deal.hands[seat] && deal.hands[seat].length) || legal.length;
+
+    function opponentVoidIn(group){
+      return opponents.some(op => voidSeats[op + ':' + group]);
+    }
+
+    // 0) Если на руках очень много козырей в начале раздачи — заранее вымываем чужие
+    //    козыри слабой козырной картой, пока свои сильные козыри целы для концовки.
+    if (deal.trickNum === 0 && trumpCount >= Math.ceil(handSize / 2) && trumpCount >= 3) {
+      const plainTrumps = legal.filter(c => c.suit === trumpSuit && c.rank !== 'J')
+        .sort((a, b) => RANK_ORDER[a.rank] - RANK_ORDER[b.rank]);
+      if (plainTrumps.length > 0) return plainTrumps[0];
+    }
 
     // 1) Свежий туз (ещё не козырь, масть ещё не разыгрывалась) — самое время его обналичить,
-    //    пока его позже не срезали козырем.
-    const freshAce = legal.find(c => c.rank !== 'J' && c.suit !== trumpSuit && c.rank === 'A' && !ledSuitsPlayed.includes(c.suit));
+    //    пока его позже не срезали козырем. Но не суём его туда, где известный соперник
+    //    уже спасовал — он срежет туза бесплатно.
+    const freshAce = legal.find(c =>
+      c.rank === 'A' && c.suit !== trumpSuit &&
+      !ledSuitsPlayed.includes(c.suit) && !opponentVoidIn(c.suit)
+    );
     if (freshAce) return freshAce;
 
-    // 2) Ходим младшей картой самой длинной своей не козырной масти — так постепенно
-    //    выманиваем чужие козыри и берём контроль над столом.
+    // 2) Ходим младшей картой самой длинной своей не козырной масти, избегая мастей,
+    //    где известный соперник уже спасовал (он срежет карту, а не сбросит мусор).
     const suitGroups = {};
     legal.forEach(c => {
-      if (c.rank !== 'J' && c.suit !== trumpSuit) {
+      if (c.rank !== 'J' && c.suit !== trumpSuit && !opponentVoidIn(c.suit)) {
         (suitGroups[c.suit] = suitGroups[c.suit] || []).push(c);
       }
     });
@@ -826,7 +854,8 @@
       return longest[0];
     }
 
-    // 3) На руке остались только козыри/валеты — ходим самым слабым из них.
+    // 3) Все безопасные масти кончились (или их не было) — ходим самой слабой
+    //    разрешённой картой, что осталась (пусть даже в "опасную" масть или козырь).
     return cheapestCard(legal);
   }
 
@@ -862,7 +891,7 @@
 
     const trick = deal.trick || [];
     return trick.length === 0
-      ? chooseLeadCard(legal, deal)
+      ? chooseLeadCard(legal, deal, seat)
       : chooseFollowCard(legal, deal, seat);
   }
 
@@ -930,6 +959,11 @@
         deal.ledSuit = (card.rank === 'J') ? null : card.suit;
         deal.ledGroup = effectiveGroup(card, deal.trumpSuit);
         if (card.rank !== 'J' && !deal.ledSuitsPlayed.includes(card.suit)) deal.ledSuitsPlayed.push(card.suit);
+      } else if (effectiveGroup(card, deal.trumpSuit) !== deal.ledGroup) {
+        // Игрок не смог зайти в масть хода (спасовал) — запоминаем это на всю раздачу,
+        // чтобы боты не кидали тузов в масть, где соперник заведомо срежет их козырем.
+        deal.voidSeats = deal.voidSeats || {};
+        deal.voidSeats[seat + ':' + deal.ledGroup] = true;
       }
       deal.trick.push({ seat, card });
 
