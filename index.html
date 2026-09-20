@@ -219,21 +219,36 @@
 
 <div class="waiting" id="menu">
   <div class="dots" style="font-size:20px; font-weight:700; color:var(--gold); margin-bottom:6px;">Белка</div>
-  <button class="menu-btn" id="btnRandom">Играть со случайными</button>
+  <button class="menu-btn" id="btnCareer">Карьера</button>
   <button class="menu-btn" id="btnSolo">Играть с ботами</button>
-  <button class="menu-btn" id="btnCreateRoom">Создать комнату</button>
-  <button class="menu-btn" id="btnBrowseRooms">Присоединиться к комнате</button>
-  <button class="menu-btn" id="btnGoPrivate">Приватная комната</button>
+  <button class="menu-btn" id="btnMultiplayer">Мультиплеер</button>
 </div>
 
-<div class="waiting" id="privateScreen" style="display:none;">
-  <button class="menu-btn back-btn" id="btnBackFromPrivate">‹ Назад</button>
-  <div class="dots" style="font-size:16px;">Приватная комната</div>
-  <button class="menu-btn" id="btnCreatePrivate">Создать приватную</button>
-  <div style="display:flex; flex-direction:column; align-items:center; gap:10px; margin-top:4px;">
-    <input id="codeInput" maxlength="5" placeholder="КОД" class="code-input">
-    <button class="menu-btn" id="btnJoinPrivate">Войти по коду</button>
-  </div>
+<div class="waiting" id="careerScreen" style="display:none;">
+  <button class="menu-btn back-btn" id="btnBackFromCareer">‹ Назад</button>
+  <div class="dots" style="font-size:16px;">Карьера</div>
+  <button class="menu-btn" id="btnTutorial">📘 Обучение</button>
+  <div id="careerStages" style="display:flex; flex-direction:column; gap:8px; width:240px; max-height:44vh; overflow-y:auto; margin-top:4px;"></div>
+</div>
+
+<div class="waiting" id="tutorialTips" style="display:none;">
+  <div class="dots" style="font-size:16px;">Обучение</div>
+  <div class="sub" id="tutorialTipText" style="max-width:280px; text-align:center; font-size:14px; line-height:1.5;"></div>
+  <button class="menu-btn" id="btnTutorialNext">Далее</button>
+</div>
+
+<div class="waiting" id="multiplayerScreen" style="display:none;">
+  <button class="menu-btn back-btn" id="btnBackFromMultiplayer">‹ Назад</button>
+  <div class="dots" style="font-size:16px;">Мультиплеер</div>
+  <button class="menu-btn" id="btnCreateRoom">Создать комнату</button>
+  <button class="menu-btn" id="btnBrowseRooms">Присоединиться к комнате</button>
+</div>
+
+<div class="waiting" id="createRoomScreen" style="display:none;">
+  <button class="menu-btn back-btn" id="btnBackFromCreate">‹ Назад</button>
+  <div class="dots" style="font-size:16px;">Создать комнату</div>
+  <input id="createPasswordInput" placeholder="Пароль (необязательно)" class="code-input" style="text-transform:none; letter-spacing:1px; font-size:16px; width:220px;">
+  <button class="menu-btn" id="btnConfirmCreate">Создать</button>
 </div>
 
 <div class="waiting" id="roomListScreen" style="display:none;">
@@ -241,6 +256,14 @@
   <div class="dots" style="font-size:16px;">Открытые комнаты</div>
   <div id="roomListItems" style="display:flex; flex-direction:column; gap:10px; width:260px; max-height:50vh; overflow-y:auto;"></div>
   <div class="sub" id="roomListEmpty">Пока никто не создал комнату</div>
+</div>
+
+<div class="waiting" id="passwordScreen" style="display:none;">
+  <button class="menu-btn back-btn" id="btnBackFromPassword">‹ Назад</button>
+  <div class="dots" style="font-size:16px;">Комната закрыта паролем</div>
+  <input id="joinPasswordInput" placeholder="Пароль" class="code-input" style="text-transform:none; letter-spacing:1px; font-size:16px; width:220px;">
+  <button class="menu-btn" id="btnSubmitPassword">Войти</button>
+  <div class="sub" id="passwordError" style="color:#d98a8a;"></div>
 </div>
 
 <div class="waiting" id="waiting" style="display:none;">
@@ -328,9 +351,33 @@
 
   let mySeat = null;
   let roomRef = null;
+  // null = обычная игра (бонусные ошибки боту не добавляются); число = этап карьеры,
+  // от него зависит шанс "ошибки" у ботов (см. mistakeChanceForStage).
+  let careerStage = null;
+
+  // ---------------- Автовход по ссылке от бота (?room=КОД или ?room=priv_КОД) ----------------
+  // Бот в /create и /join присылает именно такую ссылку с web_app-кнопкой — так игрок
+  // сразу попадает за нужный стол, минуя главное меню.
+  function joinRoomFromDeepLink(){
+    const params = new URLSearchParams(window.location.search);
+    let room = (params.get('room') || '').trim();
+    if (!room) return false;
+    if (!room.startsWith('priv_')) room = 'priv_' + room.toUpperCase();
+    roomRef = db.ref('rooms/' + room);
+    document.getElementById('waitingLabel').textContent = 'Ожидаем игроков за столом…';
+    document.getElementById('roomCodeBox').style.display = 'none';
+    document.getElementById('waitingSub').textContent = '';
+    showScreen('waiting');
+    joinRoomBySeat();
+    return true;
+  }
 
   const RANKS = ['7','8','9','10','J','Q','K','A'];
   const SUIT_LIST = ['♠','♣','♦','♥'];
+
+  // true — идёт обучение: раздача не тасуется, а идёт по заранее заготовленному
+  // порядку (buildTutorialDeck), чтобы рука игрока наглядно показывала правила.
+  let tutorialMode = false;
 
   function buildShuffledDeck(){
     const deck = [];
@@ -342,6 +389,28 @@
     return deck;
   }
 
+  // Полная колода (все 32 карты, без повторов), упорядоченная так, чтобы первые 8 карт
+  // (рука игрока, seat 0) наглядно показывали: козырного валета (сильнейшая карта в игре),
+  // масти для обязательного хода в масть, и туза нетронутой масти (правило про сброс туза).
+  // Козырь первой раздачи — всегда трефы, а трефовый валет достаётся как раз seat 0.
+  function buildTutorialDeck(){
+    return [
+      { rank:'J', suit:'♣' }, { rank:'7', suit:'♣' },
+      { rank:'A', suit:'♠' }, { rank:'7', suit:'♠' },
+      { rank:'Q', suit:'♥' }, { rank:'K', suit:'♥' },
+      { rank:'9', suit:'♦' }, { rank:'10', suit:'♦' },
+
+      { rank:'J', suit:'♠' }, { rank:'8', suit:'♣' }, { rank:'9', suit:'♣' }, { rank:'10', suit:'♣' },
+      { rank:'8', suit:'♠' }, { rank:'9', suit:'♠' }, { rank:'A', suit:'♥' }, { rank:'7', suit:'♥' },
+
+      { rank:'J', suit:'♥' }, { rank:'Q', suit:'♣' }, { rank:'K', suit:'♣' }, { rank:'A', suit:'♣' },
+      { rank:'10', suit:'♠' }, { rank:'Q', suit:'♠' }, { rank:'K', suit:'♠' }, { rank:'8', suit:'♥' },
+
+      { rank:'J', suit:'♦' }, { rank:'9', suit:'♥' }, { rank:'10', suit:'♥' }, { rank:'K', suit:'♦' },
+      { rank:'A', suit:'♦' }, { rank:'Q', suit:'♦' }, { rank:'7', suit:'♦' }, { rank:'8', suit:'♦' }
+    ];
+  }
+
   // ---------------- Раздача: пишет ОБЩЕЕ состояние стола в Firebase ----------------
   // ВАЖНО: обновляем поля match точечно (multi-path update), а не перезаписываем
   // весь объект match целиком — иначе можно затереть match/eyes, если начисление
@@ -351,7 +420,7 @@
       const existed = matchSnap.exists();
       let match = matchSnap.val() || { dealNumber: 1, dealerSeat: 0, personalSuit: null, eyes: { 0: 0, 1: 0 } };
 
-      const deck = buildShuffledDeck();
+      const deck = tutorialMode ? buildTutorialDeck() : buildShuffledDeck();
       const hands = [[], [], [], []];
       for (let seat = 0; seat < 4; seat++) hands[seat] = deck.slice(seat * 8, seat * 8 + 8);
 
@@ -378,6 +447,7 @@
         dealNumber: match.dealNumber,
         dealerSeat: match.dealerSeat,
         turn: (match.dealerSeat + 1) % 4,
+        turnStartedAt: Date.now(),
         trick: [],
         ledGroup: null,
         ledSuit: null,
@@ -407,33 +477,8 @@
     });
   }
 
-  // ---------------- Matchmaking (без изменений) ----------------
-  function tryMatchmake(){
-    db.ref('lobby/lock').transaction(locked => locked ? undefined : true, (error, committed) => {
-      if (error || !committed) return;
-      db.ref('lobby/queue').once('value').then(qSnap => {
-        const queue = qSnap.val() || {};
-        const entries = Object.keys(queue).map(id => ({ id, ...queue[id] }));
-        entries.sort((a, b) => (a.joinedAt || 0) - (b.joinedAt || 0));
-        if (entries.length >= 4) {
-          const chosen = entries.slice(0, 4);
-          const newRoomKey = db.ref('rooms').push().key;
-          const players = {};
-          chosen.forEach((p, seat) => { players[seat] = { id: p.id, name: p.name }; });
-          const updates = {};
-          updates['rooms/' + newRoomKey + '/players'] = players;
-          chosen.forEach(p => {
-            updates['lobby/queue/' + p.id] = null;
-            updates['lobby/assignments/' + p.id] = newRoomKey;
-          });
-          return db.ref().update(updates);
-        }
-      }).finally(() => db.ref('lobby/lock').set(false));
-    });
-  }
-
   function showScreen(id){
-    ['menu', 'privateScreen', 'roomListScreen', 'waiting'].forEach(s => {
+    ['menu', 'careerScreen', 'tutorialTips', 'multiplayerScreen', 'createRoomScreen', 'roomListScreen', 'passwordScreen', 'waiting'].forEach(s => {
       document.getElementById(s).style.display = (s === id) ? 'flex' : 'none';
     });
   }
@@ -445,35 +490,94 @@
     return code;
   }
 
-  document.getElementById('btnRandom').addEventListener('click', () => {
-    document.getElementById('waitingLabel').textContent = 'Ожидаем игроков за столом…';
-    showScreen('waiting');
-    db.ref('lobby/queue/' + myId).set({ name: myName, joinedAt: firebase.database.ServerValue.TIMESTAMP });
-    db.ref('lobby/queue').on('value', snap => {
-      const queue = snap.val() || {};
-      if (!roomRef) {
-        document.getElementById('waitingCount').textContent = Math.min(Object.keys(queue).length, 4) + ' / 4';
+  // ==================== Карьера: прогресс ====================
+  const CAREER_STORAGE_KEY = 'belka_career_progress';
+  let careerProgressCache = 1;
+
+  function loadCareerProgress(){
+    if (tgUser) {
+      return db.ref('careers/' + myId + '/unlockedStage').once('value').then(snap => snap.val() || 1);
+    }
+    return Promise.resolve(parseInt(localStorage.getItem(CAREER_STORAGE_KEY) || '1', 10));
+  }
+
+  function saveCareerProgress(stage){
+    careerProgressCache = stage;
+    if (tgUser) {
+      db.ref('careers/' + myId + '/unlockedStage').set(stage);
+    } else {
+      localStorage.setItem(CAREER_STORAGE_KEY, String(stage));
+    }
+  }
+
+  // Победа на этапе карьеры открывает следующий (если это был последний открытый этап).
+  function handleCareerMatchResult(stage, won){
+    if (!won) return;
+    if (stage >= careerProgressCache) {
+      saveCareerProgress(Math.min(stage + 1, CAREER_STAGES_COUNT));
+      renderCareerStages();
+    }
+  }
+
+  function renderCareerStages(){
+    const container = document.getElementById('careerStages');
+    container.innerHTML = '';
+    for (let stage = 1; stage <= CAREER_STAGES_COUNT; stage++) {
+      const unlocked = stage <= careerProgressCache;
+      const btn = document.createElement('button');
+      btn.className = 'menu-btn';
+      btn.style.width = '100%';
+      btn.textContent = unlocked ? `Этап ${stage}` : `🔒 Этап ${stage}`;
+      if (!unlocked) {
+        btn.disabled = true;
+        btn.style.opacity = '0.45';
+      } else {
+        btn.addEventListener('click', () => startBotsGame(stage));
       }
-      tryMatchmake();
-    });
-    db.ref('lobby/assignments/' + myId).on('value', snap => {
-      const roomId = snap.val();
-      if (roomId && !roomRef) {
-        roomRef = db.ref('rooms/' + roomId);
-        joinAssignedRoom();
-      }
+      container.appendChild(btn);
+    }
+  }
+
+  document.getElementById('btnCareer').addEventListener('click', () => {
+    showScreen('careerScreen');
+    loadCareerProgress().then(stage => {
+      careerProgressCache = stage;
+      renderCareerStages();
     });
   });
+  document.getElementById('btnBackFromCareer').addEventListener('click', () => showScreen('menu'));
 
-  function joinAssignedRoom(){
-    roomRef.child('players').once('value').then(playersSnap => {
-      const players = playersSnap.val() || {};
-      for (const seat in players) {
-        if (players[seat] && players[seat].id === myId) mySeat = Number(seat);
-      }
-      attachRoomListeners();
-    });
+  // ==================== Обучение ====================
+  const TUTORIAL_TIPS = [
+    'Козырь — самая сильная масть в раздаче. Все валеты — козыри всегда, независимо от масти хода.',
+    'Валеты по силе между собой: ♣ (сильнейший) > ♠ > ♥ > ♦ (слабейший) — этот порядок не меняется от раздачи к раздаче.',
+    'Если у тебя есть карта масти, которой сходили — обязан сходить ей же. Козырять можно только когда этой масти совсем нет.',
+    'Потускневшие карты в руке — те, которыми сейчас ходить нельзя по правилам. Просто выбери одну из ярких.',
+    'Цель — первыми набрать 12 "глаз" за партию. Удачи!'
+  ];
+  let tutorialTipIndex = 0;
+
+  function showTutorialTip(){
+    document.getElementById('tutorialTipText').textContent = TUTORIAL_TIPS[tutorialTipIndex];
+    document.getElementById('btnTutorialNext').textContent =
+      (tutorialTipIndex === TUTORIAL_TIPS.length - 1) ? 'Играть' : 'Далее';
   }
+
+  document.getElementById('btnTutorial').addEventListener('click', () => {
+    tutorialMode = true;
+    tutorialTipIndex = 0;
+    showTutorialTip();
+    showScreen('tutorialTips');
+  });
+
+  document.getElementById('btnTutorialNext').addEventListener('click', () => {
+    tutorialTipIndex++;
+    if (tutorialTipIndex >= TUTORIAL_TIPS.length) {
+      startBotsGame(null);
+    } else {
+      showTutorialTip();
+    }
+  });
 
   function joinRoomBySeat(){
     roomRef.child('players').transaction(players => {
@@ -502,7 +606,11 @@
     });
   }
 
-  document.getElementById('btnSolo').addEventListener('click', () => {
+  // Общий запуск партии с ботами — используется и "Играть с ботами", и этапами карьеры.
+  // stage=null — обычная быстрая игра (боты без проскальзывающих ошибок сверх обычного);
+  // stage=число — карьерный этап, боты играют с шансом ошибки по mistakeChanceForStage(stage).
+  function startBotsGame(stage){
+    careerStage = stage || null;
     const roomKey = db.ref('rooms').push().key;
     roomRef = db.ref('rooms/' + roomKey);
     mySeat = 0;
@@ -517,14 +625,31 @@
     document.getElementById('roomCodeBox').style.display = 'none';
     showScreen('waiting');
     roomRef.child('players').set(players).then(attachRoomListeners);
-  });
+  }
+
+  document.getElementById('btnSolo').addEventListener('click', () => startBotsGame(null));
+
+  document.getElementById('btnMultiplayer').addEventListener('click', () => showScreen('multiplayerScreen'));
+  document.getElementById('btnBackFromMultiplayer').addEventListener('click', () => showScreen('menu'));
 
   document.getElementById('btnCreateRoom').addEventListener('click', () => {
+    document.getElementById('createPasswordInput').value = '';
+    showScreen('createRoomScreen');
+  });
+  document.getElementById('btnBackFromCreate').addEventListener('click', () => showScreen('multiplayerScreen'));
+
+  document.getElementById('btnConfirmCreate').addEventListener('click', () => {
+    const password = document.getElementById('createPasswordInput').value.trim();
     const roomKey = db.ref('rooms').push().key;
     roomRef = db.ref('rooms/' + roomKey);
     const publicRoomRef = db.ref('public_rooms/' + roomKey);
-    publicRoomRef.set({ creatorName: myName, createdAt: firebase.database.ServerValue.TIMESTAMP });
+    publicRoomRef.set({
+      creatorName: myName,
+      createdAt: firebase.database.ServerValue.TIMESTAMP,
+      hasPassword: !!password
+    });
     publicRoomRef.onDisconnect().remove();
+    if (password) roomRef.child('password').set(password);
     document.getElementById('waitingLabel').textContent = 'Комната создана — ждём игроков';
     document.getElementById('waitingSub').textContent = 'Другие увидят её в списке открытых комнат';
     document.getElementById('roomCodeBox').style.display = 'none';
@@ -532,9 +657,21 @@
     joinRoomBySeat();
   });
 
+  function enterRoomAndWait(roomId){
+    db.ref('public_rooms').off('value');
+    roomRef = db.ref('rooms/' + roomId);
+    document.getElementById('waitingLabel').textContent = 'Ожидаем игроков за столом…';
+    document.getElementById('waitingSub').textContent = '';
+    document.getElementById('roomCodeBox').style.display = 'none';
+    showScreen('waiting');
+    joinRoomBySeat();
+  }
+
+  let pendingPasswordRoomId = null;
+
   document.getElementById('btnBackFromList').addEventListener('click', () => {
     db.ref('public_rooms').off('value');
-    showScreen('menu');
+    showScreen('multiplayerScreen');
   });
 
   document.getElementById('btnBrowseRooms').addEventListener('click', () => {
@@ -549,15 +686,17 @@
       ids.forEach(roomId => {
         const item = document.createElement('div');
         item.className = 'room-item';
-        item.innerHTML = `<span class="creator">Комната ${rooms[roomId].creatorName}</span><span class="count" id="count_${roomId}">…</span>`;
+        const lock = rooms[roomId].hasPassword ? ' 🔒' : '';
+        item.innerHTML = `<span class="creator">Комната ${rooms[roomId].creatorName}${lock}</span><span class="count" id="count_${roomId}">…</span>`;
         item.addEventListener('click', () => {
-          db.ref('public_rooms').off('value');
-          roomRef = db.ref('rooms/' + roomId);
-          document.getElementById('waitingLabel').textContent = 'Ожидаем игроков за столом…';
-          document.getElementById('waitingSub').textContent = '';
-          document.getElementById('roomCodeBox').style.display = 'none';
-          showScreen('waiting');
-          joinRoomBySeat();
+          if (rooms[roomId].hasPassword) {
+            pendingPasswordRoomId = roomId;
+            document.getElementById('joinPasswordInput').value = '';
+            document.getElementById('passwordError').textContent = '';
+            showScreen('passwordScreen');
+          } else {
+            enterRoomAndWait(roomId);
+          }
         });
         listEl.appendChild(item);
         db.ref('rooms/' + roomId + '/players').on('value', pSnap => {
@@ -569,29 +708,23 @@
     });
   });
 
-  document.getElementById('btnGoPrivate').addEventListener('click', () => showScreen('privateScreen'));
-  document.getElementById('btnBackFromPrivate').addEventListener('click', () => showScreen('menu'));
-
-  document.getElementById('btnCreatePrivate').addEventListener('click', () => {
-    const code = generateRoomCode();
-    roomRef = db.ref('rooms/priv_' + code);
-    document.getElementById('waitingLabel').textContent = 'Ожидаем игроков за столом…';
-    document.getElementById('roomCodeBox').style.display = 'block';
-    document.getElementById('roomCodeText').textContent = code;
-    document.getElementById('waitingSub').textContent = 'Отправь этот код друзьям';
-    showScreen('waiting');
-    joinRoomBySeat();
+  document.getElementById('btnBackFromPassword').addEventListener('click', () => {
+    pendingPasswordRoomId = null;
+    showScreen('roomListScreen');
   });
 
-  document.getElementById('btnJoinPrivate').addEventListener('click', () => {
-    const code = document.getElementById('codeInput').value.trim().toUpperCase();
-    if (code.length < 4) return;
-    roomRef = db.ref('rooms/priv_' + code);
-    document.getElementById('waitingLabel').textContent = 'Ожидаем игроков за столом…';
-    document.getElementById('roomCodeBox').style.display = 'none';
-    document.getElementById('waitingSub').textContent = '';
-    showScreen('waiting');
-    joinRoomBySeat();
+  document.getElementById('btnSubmitPassword').addEventListener('click', () => {
+    const entered = document.getElementById('joinPasswordInput').value;
+    const roomId = pendingPasswordRoomId;
+    if (!roomId) return;
+    db.ref('rooms/' + roomId + '/password').once('value').then(snap => {
+      if (snap.val() === entered) {
+        pendingPasswordRoomId = null;
+        enterRoomAndWait(roomId);
+      } else {
+        document.getElementById('passwordError').textContent = 'Неверный пароль';
+      }
+    });
   });
 
   function attachRoomListeners(){
@@ -883,17 +1016,55 @@
     return cheapestCard(legal);
   }
 
+  // ==================== Карьера: сложность ботов ====================
+  const CAREER_STAGES_COUNT = 10;
+  // Шанс, что бот на этом этапе сходит случайной легальной картой вместо "умной" —
+  // имитация ошибки новичка. С ростом этапа падает до 0 (последний этап — без поблажек).
+  function mistakeChanceForStage(stage){
+    return Math.max(0, 0.42 - (stage - 1) * 0.045);
+  }
+
   function chooseBotCard(deal, seat){
     const hand = (deal.hands && deal.hands[seat]) || [];
     const legal = legalCardsForHand(hand, deal.ledGroup, deal.trumpSuit, deal.ledSuitsPlayed);
     if (legal.length === 0) return null;
     if (legal.length === 1) return legal[0];
 
+    if (careerStage != null) {
+      const mistakeChance = mistakeChanceForStage(careerStage);
+      if (mistakeChance > 0 && Math.random() < mistakeChance) {
+        return legal[Math.floor(Math.random() * legal.length)];
+      }
+    }
+
     const trick = deal.trick || [];
     return trick.length === 0
       ? chooseLeadCard(legal, deal, seat)
       : chooseFollowCard(legal, deal, seat);
   }
+
+  // ==================== Защита от зависания (АФК/обрыв связи) ====================
+  // Если ход слишком долго не делается (человек отвлёкся или потерял связь),
+  // хост (место 0) через некоторое время ходит за него сам — одним ходом, не
+  // превращая насовсем в бота. Как только игрок возвращается — ходит сам дальше.
+  const TURN_TIMEOUT_MS = 30000;
+  let turnWatchdogStarted = false;
+
+  function startTurnWatchdog(){
+    if (turnWatchdogStarted) return;
+    turnWatchdogStarted = true;
+    setInterval(() => {
+      if (mySeat !== 0 || !roomRef || !gameState) return;
+      const deal = gameState;
+      if (deal.status !== 'playing') return;
+      if (deal.turn == null || !deal.turnStartedAt) return;
+      if (Date.now() - deal.turnStartedAt < TURN_TIMEOUT_MS) return;
+      const seat = deal.turn;
+      const card = chooseBotCard(deal, seat);
+      if (card) playCard(seat, card);
+    }, 5000);
+  }
+  startTurnWatchdog();
 
   // ---------------- Синхронизация состояния стола из Firebase ----------------
   function syncDealState(room, players){
@@ -969,6 +1140,7 @@
 
       if (deal.trick.length < 4) {
         deal.turn = (seat + 1) % 4;
+        deal.turnStartedAt = Date.now();
         return deal;
       }
 
@@ -1046,6 +1218,7 @@
         deal.pendingFinishData = null;
       } else {
         deal.turn = winnerSeat;
+        deal.turnStartedAt = Date.now();
       }
       return deal;
     }, () => {
@@ -1132,6 +1305,7 @@
       document.getElementById('dealResultText').textContent = `${text}\n\n${winner} выигрывают партию! (${eyes[my]} : ${eyes[opp]})`;
       document.getElementById('btnPlayAgain').textContent = 'В меню';
       overlay.dataset.matchOver = 'true';
+      if (careerStage != null) handleCareerMatchResult(careerStage, eyes[my] >= 12);
     } else {
       document.getElementById('dealResultText').textContent = text;
       document.getElementById('btnPlayAgain').textContent = deal.finishedTie ? 'Переигровка' : 'Следующая раздача';
@@ -1150,6 +1324,8 @@
       dealVersionSeen = null;
       roomRef = null;
       mySeat = null;
+      careerStage = null;
+      tutorialMode = false;
       showScreen('menu');
       return;
     }
@@ -1163,6 +1339,10 @@
       }, () => dealAndWriteHands());
     }
   });
+
+  // Если пришли по ссылке от бота (?room=КОД) — сразу садимся за нужный стол,
+  // минуя главное меню. Иначе остаётся обычный экран меню, как и раньше.
+  joinRoomFromDeepLink();
 </script>
 
 
