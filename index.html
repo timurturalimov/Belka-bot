@@ -199,6 +199,30 @@
   }
   .room-item .creator{ font-size:14px; }
   .room-item .count{ font-size:13px; color:var(--gold); font-weight:600; }
+  .cosmetic-item{
+    display:flex; align-items:center; gap:12px;
+    background:rgba(0,0,0,0.28);
+    border:1px solid var(--gold-dim);
+    border-radius:10px;
+    padding:10px 14px;
+    cursor:pointer;
+  }
+  .cosmetic-item.locked{ opacity:0.4; cursor:default; }
+  .cosmetic-item.equipped{ border-color:var(--gold); box-shadow:0 0 0 1px var(--gold) inset; }
+  .cosmetic-swatch{ width:34px; height:24px; border-radius:5px; border:1px solid rgba(0,0,0,0.4); flex:0 0 auto; }
+  .cosmetic-section-title{ font-size:12px; color:var(--gold); letter-spacing:.4px; margin:6px 0 -4px; align-self:flex-start; }
+  .leaderboard-row{
+    display:flex; align-items:center; gap:10px;
+    background:rgba(0,0,0,0.28);
+    border:1px solid var(--gold-dim);
+    border-radius:10px;
+    padding:8px 14px;
+    font-size:13px;
+  }
+  .leaderboard-row .rank{ width:22px; color:var(--gold); font-weight:700; }
+  .leaderboard-row .lb-name{ flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .leaderboard-row .lb-points{ color:var(--gold); font-weight:700; }
+  .leaderboard-row .lb-stats{ font-size:10px; opacity:.6; }
   .disabled-card{ opacity:0.4; filter:grayscale(60%); }
   .trick-card{
     position:absolute;
@@ -227,6 +251,8 @@
   <button class="menu-btn" id="btnCareer">Карьера</button>
   <button class="menu-btn" id="btnSolo">Играть с ботами</button>
   <button class="menu-btn" id="btnMultiplayer">Мультиплеер</button>
+  <button class="menu-btn" id="btnCollection">🎨 Коллекция</button>
+  <button class="menu-btn" id="btnLeaderboard">🏆 Лидерборд</button>
 </div>
 
 <div class="waiting" id="careerScreen" style="display:none;">
@@ -269,6 +295,19 @@
   <input id="joinPasswordInput" placeholder="Пароль" class="code-input" style="text-transform:none; letter-spacing:1px; font-size:16px; width:220px;">
   <button class="menu-btn" id="btnSubmitPassword">Войти</button>
   <div class="sub" id="passwordError" style="color:#d98a8a;"></div>
+</div>
+
+<div class="waiting" id="collectionScreen" style="display:none;">
+  <button class="menu-btn back-btn" id="btnBackFromCollection">‹ Назад</button>
+  <div class="dots" style="font-size:16px;">Коллекция</div>
+  <div id="collectionList" style="display:flex; flex-direction:column; gap:10px; width:280px; max-height:60vh; overflow-y:auto;"></div>
+</div>
+
+<div class="waiting" id="leaderboardScreen" style="display:none;">
+  <button class="menu-btn back-btn" id="btnBackFromLeaderboard">‹ Назад</button>
+  <div class="dots" style="font-size:16px;">Лидерборд · мультиплеер</div>
+  <div id="leaderboardList" style="display:flex; flex-direction:column; gap:8px; width:280px; max-height:60vh; overflow-y:auto;"></div>
+  <div class="sub" id="leaderboardEmpty" style="display:none;">Пока нет результатов</div>
 </div>
 
 <div class="waiting" id="waiting" style="display:none;">
@@ -359,6 +398,9 @@
   // null = обычная игра (бонусные ошибки боту не добавляются); число = этап карьеры,
   // от него зависит шанс "ошибки" у ботов (см. mistakeChanceForStage).
   let careerStage = null;
+  // true — идёт настоящий мультиплеер (не боты): только за такие матчи начисляются
+  // баллы лидерборда (см. recordMultiplayerResult).
+  let isMultiplayerMatch = false;
 
   // ---------------- Автовход по ссылке от бота (?room=КОД или ?room=priv_КОД) ----------------
   // Бот в /create и /join присылает именно такую ссылку с web_app-кнопкой — так игрок
@@ -369,6 +411,7 @@
     if (!room) return false;
     if (!room.startsWith('priv_')) room = 'priv_' + room.toUpperCase();
     roomRef = db.ref('rooms/' + room);
+    isMultiplayerMatch = true;
     document.getElementById('waitingLabel').textContent = 'Ожидаем игроков за столом…';
     document.getElementById('roomCodeBox').style.display = 'none';
     document.getElementById('waitingSub').textContent = '';
@@ -463,6 +506,11 @@
         trickNum: 0,
         status: 'playing'
       };
+      // Если предыдущая раздача закончилась ничьей 60:60, эта раздача — переигровка:
+      // её итог всегда стоит 4 глаза, независимо от того, у кого козырь и был ли спас.
+      // Флаг переносим прямо в саму раздачу (а не читаем match.replayFor4 отдельно
+      // в момент завершения), чтобы он был доступен внутри транзакции playCard.
+      if (match.replayFor4) deal.eyesOverride = 4;
 
       const updates = {
         'match/dealNumber': match.dealNumber,
@@ -483,7 +531,7 @@
   }
 
   function showScreen(id){
-    ['menu', 'careerScreen', 'tutorialTips', 'multiplayerScreen', 'createRoomScreen', 'roomListScreen', 'passwordScreen', 'waiting'].forEach(s => {
+    ['menu', 'careerScreen', 'tutorialTips', 'multiplayerScreen', 'createRoomScreen', 'roomListScreen', 'passwordScreen', 'collectionScreen', 'leaderboardScreen', 'waiting'].forEach(s => {
       document.getElementById(s).style.display = (s === id) ? 'flex' : 'none';
     });
   }
@@ -518,10 +566,11 @@
   // Победа на этапе карьеры открывает следующий (если это был последний открытый этап).
   function handleCareerMatchResult(stage, won){
     if (!won) return;
+    lastCareerUnlock = unlockCareerReward(stage);
     if (stage >= careerProgressCache) {
       saveCareerProgress(Math.min(stage + 1, CAREER_STAGES_COUNT));
-      renderCareerStages();
     }
+    renderCareerStages();
   }
 
   function renderCareerStages(){
@@ -529,10 +578,17 @@
     container.innerHTML = '';
     for (let stage = 1; stage <= CAREER_STAGES_COUNT; stage++) {
       const unlocked = stage <= careerProgressCache;
+      const reward = CAREER_REWARDS[stage];
+      const alreadyOwned = reward ? cosmeticsCache.unlocked[reward.list].includes(reward.id) : true;
+      const rewardLabel = rewardLabelForStage(stage);
       const btn = document.createElement('button');
       btn.className = 'menu-btn';
       btn.style.width = '100%';
-      btn.textContent = unlocked ? `Этап ${stage}` : `🔒 Этап ${stage}`;
+      btn.style.whiteSpace = 'pre-line';
+      btn.style.fontSize = '13px';
+      btn.style.lineHeight = '1.4';
+      const rewardLine = rewardLabel ? `\n${alreadyOwned ? '✓' : '🎁'} ${rewardLabel}` : '';
+      btn.textContent = (unlocked ? `Этап ${stage}` : `🔒 Этап ${stage}`) + rewardLine;
       if (!unlocked) {
         btn.disabled = true;
         btn.style.opacity = '0.45';
@@ -616,14 +672,16 @@
   // stage=число — карьерный этап, боты играют с шансом ошибки по mistakeChanceForStage(stage).
   function startBotsGame(stage){
     careerStage = stage || null;
+    isMultiplayerMatch = false;
     const roomKey = db.ref('rooms').push().key;
     roomRef = db.ref('rooms/' + roomKey);
     mySeat = 0;
+    const botNames = currentBotNames();
     const players = {
       0: { id: myId, name: myName },
-      1: { id: 'bot_1', name: 'Бот Айдос', bot: true },
-      2: { id: 'bot_2', name: 'Бот Динара', bot: true },
-      3: { id: 'bot_3', name: 'Бот Ержан', bot: true }
+      1: { id: 'bot_1', name: 'Бот ' + botNames[0], bot: true },
+      2: { id: 'bot_2', name: 'Бот ' + botNames[1], bot: true },
+      3: { id: 'bot_3', name: 'Бот ' + botNames[2], bot: true }
     };
     document.getElementById('waitingLabel').textContent = 'Сажаем ботов за стол…';
     document.getElementById('waitingSub').textContent = '';
@@ -644,6 +702,7 @@
   document.getElementById('btnBackFromCreate').addEventListener('click', () => showScreen('multiplayerScreen'));
 
   document.getElementById('btnConfirmCreate').addEventListener('click', () => {
+    isMultiplayerMatch = true;
     const password = document.getElementById('createPasswordInput').value.trim();
     const roomKey = db.ref('rooms').push().key;
     roomRef = db.ref('rooms/' + roomKey);
@@ -663,6 +722,7 @@
   });
 
   function enterRoomAndWait(roomId){
+    isMultiplayerMatch = true;
     db.ref('public_rooms').off('value');
     roomRef = db.ref('rooms/' + roomId);
     document.getElementById('waitingLabel').textContent = 'Ожидаем игроков за столом…';
@@ -772,6 +832,7 @@
     for(let i=0;i<count;i++){
       const d = document.createElement('div');
       d.className = 'back-card';
+      applyCardBackStyle(d);
       el.appendChild(d);
     }
   }
@@ -1029,6 +1090,227 @@
     return Math.max(0, 0.42 - (stage - 1) * 0.045);
   }
 
+  // ==================== Косметика: рубашки карт, темы стола, имена ботов ====================
+  // Открывается прохождением этапов карьеры (см. CAREER_REWARDS). Хранится отдельно от
+  // unlockedStage, так что владение косметикой сохраняется даже при переигровке этапов.
+  const CARD_BACK_SKINS = [
+    { id:'default', label:'Классика',     css:'linear-gradient(135deg,#2b4c7e,#16233a)' },
+    { id:'emerald', label:'Изумруд',      css:'linear-gradient(135deg,#0f5132,#123d27)' },
+    { id:'fire',    label:'Огонь',        css:'linear-gradient(135deg,#7a1f1f,#3d0f0f)' },
+    { id:'royal',   label:'Королевский',  css:'linear-gradient(135deg,#3a1f5e,#20112f)' },
+    { id:'legend',  label:'Легенда',      css:'linear-gradient(135deg,#c9a13b,#7a5c1e)' }
+  ];
+  const TABLE_THEMES = [
+    { id:'default', label:'Стандарт', dark:'#173324', light:'#1f4632' },
+    { id:'night',   label:'Ночь',     dark:'#141b30', light:'#232f52' },
+    { id:'desert',  label:'Пустыня',  dark:'#4a3620', light:'#7a5c34' },
+    { id:'ice',     label:'Лёд',      dark:'#1a3b45', light:'#2e6577' }
+  ];
+  const BOT_NAME_PACKS = [
+    { id:'default', label:'Стандарт',   names:['Айдос','Динара','Ержан'] },
+    { id:'pack1',   label:'Аль-Фараби', names:['Айгерим','Нурлан','Сакен'] },
+    { id:'pack2',   label:'Дала',       names:['Гульмира','Ерлан','Ботагоз'] },
+    { id:'pack3',   label:'Легенда',    names:['Абай','Курмангазы','Жамбыл'] }
+  ];
+  // Какой этап карьеры какую именно косметику открывает — чередуем 3 категории по кругу,
+  // финальный (10-й) этап отдельно даёт особую "легендарную" рубашку.
+  const CAREER_REWARDS = {
+    1: { list:'cardbacks', id:'emerald' },
+    2: { list:'tables',    id:'night' },
+    3: { list:'botnames',  id:'pack1' },
+    4: { list:'cardbacks', id:'fire' },
+    5: { list:'tables',    id:'desert' },
+    6: { list:'botnames',  id:'pack2' },
+    7: { list:'cardbacks', id:'royal' },
+    8: { list:'tables',    id:'ice' },
+    9: { list:'botnames',  id:'pack3' },
+    10:{ list:'cardbacks', id:'legend' }
+  };
+  const COSMETIC_STORAGE_KEY = 'belka_cosmetics';
+
+  function defaultCosmetics(){
+    return {
+      unlocked: { cardbacks:['default'], tables:['default'], botnames:['default'] },
+      equipped: { cardbacks:'default', tables:'default', botnames:'default' }
+    };
+  }
+
+  let cosmeticsCache = defaultCosmetics();
+  // Заполняется при открытии награды прямо перед показом итога раздачи — showDealSummary
+  // один раз читает и сбрасывает это поле, чтобы вставить строку об открытии в текст.
+  let lastCareerUnlock = null;
+
+  function loadCosmetics(){
+    if (tgUser) {
+      return db.ref('careers/' + myId + '/cosmetics').once('value').then(snap => snap.val() || defaultCosmetics());
+    }
+    try {
+      const raw = localStorage.getItem(COSMETIC_STORAGE_KEY);
+      return Promise.resolve(raw ? JSON.parse(raw) : defaultCosmetics());
+    } catch(e) {
+      return Promise.resolve(defaultCosmetics());
+    }
+  }
+
+  function saveCosmetics(data){
+    cosmeticsCache = data;
+    if (tgUser) {
+      db.ref('careers/' + myId + '/cosmetics').set(data);
+    } else {
+      localStorage.setItem(COSMETIC_STORAGE_KEY, JSON.stringify(data));
+    }
+  }
+
+  function applyCosmetics(data){
+    const theme = TABLE_THEMES.find(t => t.id === data.equipped.tables) || TABLE_THEMES[0];
+    document.documentElement.style.setProperty('--felt-dark', theme.dark);
+    document.documentElement.style.setProperty('--felt-light', theme.light);
+    document.querySelectorAll('.back-card').forEach(applyCardBackStyle);
+  }
+
+  function applyCardBackStyle(el){
+    const skin = CARD_BACK_SKINS.find(s => s.id === cosmeticsCache.equipped.cardbacks) || CARD_BACK_SKINS[0];
+    el.style.background = skin.css;
+  }
+
+  function currentBotNames(){
+    const pack = BOT_NAME_PACKS.find(p => p.id === cosmeticsCache.equipped.botnames) || BOT_NAME_PACKS[0];
+    return pack.names;
+  }
+
+  function rewardLabelForStage(stage){
+    const reward = CAREER_REWARDS[stage];
+    if (!reward) return '';
+    const pool = reward.list === 'cardbacks' ? CARD_BACK_SKINS : reward.list === 'tables' ? TABLE_THEMES : BOT_NAME_PACKS;
+    const item = pool.find(x => x.id === reward.id);
+    return item ? item.label : '';
+  }
+
+  // Открывает награду за этап (если она ещё не была открыта) и сразу её экипирует, чтобы
+  // игрок сразу увидел эффект. Возвращает подпись для тоста или null, если наград для этого
+  // этапа нет или она уже была открыта раньше (например, при переигровке пройденного этапа).
+  function unlockCareerReward(stage){
+    const reward = CAREER_REWARDS[stage];
+    if (!reward) return null;
+    if (cosmeticsCache.unlocked[reward.list].includes(reward.id)) return null;
+    const data = {
+      unlocked: {
+        cardbacks: cosmeticsCache.unlocked.cardbacks.slice(),
+        tables: cosmeticsCache.unlocked.tables.slice(),
+        botnames: cosmeticsCache.unlocked.botnames.slice()
+      },
+      equipped: Object.assign({}, cosmeticsCache.equipped)
+    };
+    data.unlocked[reward.list].push(reward.id);
+    data.equipped[reward.list] = reward.id;
+    saveCosmetics(data);
+    applyCosmetics(data);
+    return rewardLabelForStage(stage);
+  }
+
+  function renderCollectionScreen(){
+    const container = document.getElementById('collectionList');
+    container.innerHTML = '';
+
+    function section(title, list, key, swatchFn){
+      const h = document.createElement('div');
+      h.className = 'cosmetic-section-title';
+      h.textContent = title;
+      container.appendChild(h);
+      list.forEach(item => {
+        const unlocked = cosmeticsCache.unlocked[key].includes(item.id);
+        const equipped = cosmeticsCache.equipped[key] === item.id;
+        const row = document.createElement('div');
+        row.className = 'cosmetic-item' + (unlocked ? '' : ' locked') + (equipped ? ' equipped' : '');
+        const swatch = document.createElement('div');
+        swatch.className = 'cosmetic-swatch';
+        swatchFn(swatch, item);
+        const label = document.createElement('span');
+        label.textContent = (unlocked ? '' : '🔒 ') + item.label + (equipped ? ' ✓' : '');
+        row.appendChild(swatch);
+        row.appendChild(label);
+        if (unlocked) {
+          row.addEventListener('click', () => {
+            const data = {
+              unlocked: cosmeticsCache.unlocked,
+              equipped: Object.assign({}, cosmeticsCache.equipped, { [key]: item.id })
+            };
+            saveCosmetics(data);
+            applyCosmetics(data);
+            renderCollectionScreen();
+          });
+        }
+        container.appendChild(row);
+      });
+    }
+
+    section('Рубашки карт', CARD_BACK_SKINS, 'cardbacks', (sw, item) => { sw.style.background = item.css; });
+    section('Темы стола', TABLE_THEMES, 'tables', (sw, item) => { sw.style.background = `linear-gradient(135deg, ${item.light}, ${item.dark})`; });
+    section('Имена ботов', BOT_NAME_PACKS, 'botnames', (sw, item) => { sw.style.background = 'var(--gold-dim)'; });
+  }
+
+  document.getElementById('btnCollection').addEventListener('click', () => {
+    showScreen('collectionScreen');
+    renderCollectionScreen();
+  });
+  document.getElementById('btnBackFromCollection').addEventListener('click', () => showScreen('menu'));
+
+  loadCosmetics().then(data => { cosmeticsCache = data; applyCosmetics(data); });
+
+  // ==================== Лидерборд: баллы за мультиплеер ====================
+  // Баллы считаются только за реальные игры с людьми (isMultiplayerMatch), не за ботов/карьеру.
+  // "Голая" победа — когда решающая раздача матча выиграна через "взяли все взятки" (12 глаз разом).
+  let pointsRecordedForRoom = null;
+
+  function recordMultiplayerResult(won, sukhaya){
+    if (!roomRef) return;
+    const roomKey = roomRef.key;
+    if (pointsRecordedForRoom === roomKey) return;
+    pointsRecordedForRoom = roomKey;
+    db.ref('leaderboard/' + myId).transaction(entry => {
+      entry = entry || { name: myName, points: 0, wins: 0, sukhaya: 0, losses: 0 };
+      entry.name = myName;
+      if (won) {
+        entry.wins = (entry.wins || 0) + 1;
+        if (sukhaya) {
+          entry.sukhaya = (entry.sukhaya || 0) + 1;
+          entry.points = (entry.points || 0) + 6;
+        } else {
+          entry.points = (entry.points || 0) + 3;
+        }
+      } else {
+        entry.losses = (entry.losses || 0) + 1;
+        entry.points = Math.max(0, (entry.points || 0) - 1);
+      }
+      return entry;
+    });
+  }
+
+  function renderLeaderboard(){
+    const list = document.getElementById('leaderboardList');
+    const empty = document.getElementById('leaderboardEmpty');
+    list.innerHTML = '';
+    empty.style.display = 'none';
+    db.ref('leaderboard').orderByChild('points').limitToLast(50).once('value').then(snap => {
+      const entries = [];
+      snap.forEach(child => { entries.push(child.val()); });
+      entries.reverse();
+      if (entries.length === 0) { empty.style.display = 'block'; return; }
+      entries.forEach((e, i) => {
+        const row = document.createElement('div');
+        row.className = 'leaderboard-row';
+        row.innerHTML = `<span class="rank">${i + 1}</span><span class="lb-name">${e.name || '?'}</span><span class="lb-stats">${e.wins || 0}П / ${e.sukhaya || 0}Г / ${e.losses || 0}пр</span><span class="lb-points">${e.points || 0}</span>`;
+        list.appendChild(row);
+      });
+    });
+  }
+
+  document.getElementById('btnLeaderboard').addEventListener('click', () => {
+    showScreen('leaderboardScreen');
+    renderLeaderboard();
+  });
+  document.getElementById('btnBackFromLeaderboard').addEventListener('click', () => showScreen('menu'));
+
   function chooseBotCard(deal, seat){
     const hand = (deal.hands && deal.hands[seat]) || [];
     const legal = legalCardsForHand(hand, deal.ledGroup, deal.trumpSuit, deal.ledSuitsPlayed);
@@ -1055,10 +1337,34 @@
   const TURN_TIMEOUT_MS = 30000;
   let turnWatchdogStarted = false;
 
+  // ---------------- Самолечение "зависшей" взятки (4 карты на столе, но не убраны) ----------------
+  // clearTrick() обычно запускается через setTimeout из scheduleTrickClear(). Проблема:
+  // Telegram WebView может придержать/остановить setTimeout, когда приложение уходит в фон
+  // (блокировка экрана, переключение чатов) — тогда таймер не срабатывает, а
+  // trickClearScheduledStamp уже считает, что уборка "запланирована", и повторно её не ставит.
+  // В итоге 4 карты навсегда остаются на столе. Эта функция — подстраховка: если по времени
+  // пора убрать взятку, а она всё ещё лежит — убираем её напрямую, независимо от таймера.
+  function maybeClearStuckTrick(deal){
+    if (!deal || !deal.trick || deal.trick.length !== 4 || deal.pendingWinnerSeat == null) return;
+    const elapsed = Date.now() - (deal.trickCompletedAt || 0);
+    if (elapsed >= TRICK_REVEAL_DELAY_MS) clearTrick();
+  }
+
+  // Проверяем сразу же, как только вкладка/приложение снова становится видимой —
+  // это самый частый момент, когда обнаруживается зависшая взятка после возврата в чат.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') maybeClearStuckTrick(gameState);
+  });
+  window.addEventListener('pageshow', () => maybeClearStuckTrick(gameState));
+
   function startTurnWatchdog(){
     if (turnWatchdogStarted) return;
     turnWatchdogStarted = true;
     setInterval(() => {
+      // Эта проверка работает у любого игрока за столом (не только у хоста) —
+      // так зависшая взятка убирается, даже если хост сам сейчас в фоне.
+      maybeClearStuckTrick(gameState);
+
       if (mySeat !== 0 || !roomRef || !gameState) return;
       const deal = gameState;
       if (deal.status !== 'playing') return;
@@ -1164,6 +1470,7 @@
       deal.trickCounts[winnerTeam] = (deal.trickCounts[winnerTeam] || 0) + 1;
       deal.trickNum = (deal.trickNum || 0) + 1;
       deal.pendingWinnerSeat = best.seat;
+      deal.trickCompletedAt = Date.now(); // нужно для maybeClearStuckTrick() как источник истины по времени
       deal.turn = null; // блокируем ходы, пока карты не убраны со стола
 
       if (deal.trickNum === 8) {
@@ -1181,12 +1488,22 @@
           const spasReached = s[loserTeam2] >= 31;
           const trumpWithWinner = deal.clubsJackTeam === winnerTeam2;
           let eyes;
-          if (deal.dealNumber === 1) eyes = 2;
-          else if (trumpWithWinner) eyes = spasReached ? 1 : 2;
-          else eyes = spasReached ? 2 : 3;
+          // Раздача-переигровка после ничьи 60:60 всегда стоит ровно 4 глаза —
+          // это условие проверяем раньше обычной формулы 1/2/3, а не после неё,
+          // иначе итоговый счёт (и текст на экране) показывал бы обычную цифру.
+          if (deal.eyesOverride) {
+            eyes = deal.eyesOverride;
+          } else if (deal.dealNumber === 1) {
+            eyes = 2;
+          } else if (trumpWithWinner) {
+            eyes = spasReached ? 1 : 2;
+          } else {
+            eyes = spasReached ? 2 : 3;
+          }
           finishData.finishedWinnerTeam = winnerTeam2;
           finishData.finishedEyes = eyes;
           finishData.finishedSpas = spasReached;
+          finishData.finishedWasReplay = !!deal.eyesOverride;
         }
         deal.pendingFinish = true;
         deal.pendingFinishData = finishData;
@@ -1246,11 +1563,13 @@
         if (deal.finishedZeroTricks) {
           match.eyes[deal.finishedWinnerTeam] = 12;
         } else if (deal.finishedTie) {
+          // Ничья: очки не начисляем, просто запоминаем, что следующая раздача — на 4 глаза.
           match.replayFor4 = true;
         } else {
-          let eyes = deal.finishedEyes;
-          if (match.replayFor4) { eyes = 4; match.replayFor4 = false; }
-          match.eyes[deal.finishedWinnerTeam] = (match.eyes[deal.finishedWinnerTeam] || 0) + eyes;
+          // deal.finishedEyes уже учитывает eyesOverride (см. playCard) — здесь просто
+          // берём готовое число, а не пересчитываем его заново по обычной формуле.
+          match.eyes[deal.finishedWinnerTeam] = (match.eyes[deal.finishedWinnerTeam] || 0) + deal.finishedEyes;
+          match.replayFor4 = false;
         }
         return match;
       });
@@ -1307,10 +1626,24 @@
     const matchOver = eyes[0] >= 12 || eyes[1] >= 12;
     if (matchOver) {
       const winner = eyes[my] >= 12 ? 'Мы' : 'Они';
-      document.getElementById('dealResultText').textContent = `${text}\n\n${winner} выигрывают партию! (${eyes[my]} : ${eyes[opp]})`;
+      const won = eyes[my] >= 12;
+      let finalText = `${text}\n\n${winner} выигрывают партию! (${eyes[my]} : ${eyes[opp]})`;
+
+      if (careerStage != null) {
+        handleCareerMatchResult(careerStage, won);
+        if (lastCareerUnlock) {
+          finalText += `\n\n🎁 Открыто: ${lastCareerUnlock}!`;
+          lastCareerUnlock = null;
+        }
+      }
+      if (isMultiplayerMatch) {
+        const sukhaya = !!(deal.finishedZeroTricks && deal.finishedWinnerTeam === my);
+        recordMultiplayerResult(won, sukhaya);
+      }
+
+      document.getElementById('dealResultText').textContent = finalText;
       document.getElementById('btnPlayAgain').textContent = 'В меню';
       overlay.dataset.matchOver = 'true';
-      if (careerStage != null) handleCareerMatchResult(careerStage, eyes[my] >= 12);
     } else {
       document.getElementById('dealResultText').textContent = text;
       document.getElementById('btnPlayAgain').textContent = deal.finishedTie ? 'Переигровка' : 'Следующая раздача';
@@ -1331,6 +1664,8 @@
       mySeat = null;
       careerStage = null;
       tutorialMode = false;
+      isMultiplayerMatch = false;
+      pointsRecordedForRoom = null;
       showScreen('menu');
       return;
     }
