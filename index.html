@@ -821,11 +821,55 @@
         const trumpNames = {'♠':'пики', '♣':'трефы', '♦':'бубны', '♥':'червы'};
         document.getElementById('trumpLabel').textContent = 'Козырь: ' + trumpNames[TRUMP_SUIT];
         syncDealState(room, players);
-      } else if (seatsFilled === 4 && mySeat === 0 && room.status !== 'dealt') {
-        dealAndWriteHands();
+      } else {
+        tryStartDeal(room, players);
       }
     });
   }
+
+  // ---------------- Самолечение "зависшего" подбора игроков ----------------
+  // Раньше раздачу запускал только клиент места 0 — если именно в момент,
+  // когда стол заполнился 4/4, его вкладка/приложение была свёрнута (например,
+  // он как раз отправлял код комнаты друзьям в другом чате), событие 'value'
+  // у него могло не обработаться вовремя, и игра зависала на "Ожидаем игроков"
+  // для всех, даже когда места давно заняты. Теперь раздачу может безопасно
+  // запустить ЛЮБОЙ подключённый игрок: берём короткую блокировку через
+  // transaction (чтобы не раздать дважды), а если блокировку поставили и не
+  // довели до конца (клиент потерял связь/разрядился), она считается
+  // "протухшей" через 8 секунд и любой другой игрок пробует снова.
+  const DEAL_LOCK_STALE_MS = 8000;
+
+  function tryStartDeal(room, players){
+    const seatsFilled = Object.keys(players).length;
+    if (seatsFilled !== 4) return;
+    if (room.status === 'dealt') return;
+    const lock = room.dealingLock;
+    if (lock && (Date.now() - lock.at < DEAL_LOCK_STALE_MS)) return;
+    roomRef.child('dealingLock').transaction(current => {
+      if (current && (Date.now() - current.at < DEAL_LOCK_STALE_MS)) return; // кто-то только что взял лок
+      return { by: myId, at: Date.now() };
+    }, (error, committed, snap) => {
+      if (error || !committed) return;
+      const lockVal = snap.val();
+      if (lockVal && lockVal.by === myId) dealAndWriteHands();
+    });
+  }
+
+  // Подстраховка на случай, если у текущего игрока именно сейчас throttled
+  // 'value'-листенер (приложение было в фоне) — перепроверяем комнату вручную,
+  // как только вкладка/приложение снова становится видимым.
+  function recheckRoomOnResume(){
+    if (!roomRef) return;
+    roomRef.once('value').then(snap => {
+      const room = snap.val() || {};
+      if (room.status === 'dealt' || !room.players) return;
+      tryStartDeal(room, room.players);
+    });
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') recheckRoomOnResume();
+  });
+  window.addEventListener('pageshow', () => recheckRoomOnResume());
 
   function renderOpponentBacks(el, count){
     el.innerHTML = '';
