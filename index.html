@@ -525,9 +525,9 @@
         updates['match/eyes'] = match.eyes;
       }
 
-      roomRef.update(updates);
+      roomRef.update(updates).catch(showFirebaseError);
       db.ref('public_rooms/' + roomRef.key).remove();
-    });
+    }).catch(showFirebaseError);
   }
 
   function showScreen(id){
@@ -651,7 +651,7 @@
       }
       return players;
     }, (error, committed, snapshot) => {
-      if (error) { console.error('join failed', error); return; }
+      if (error) { showFirebaseError(error); return; }
       const players = snapshot.val() || {};
       for (const seat in players) {
         if (players[seat] && players[seat].id === myId) mySeat = Number(seat);
@@ -665,6 +665,29 @@
       }
       attachRoomListeners();
     });
+  }
+
+  // ---------------- Диагностика связи с базой ----------------
+  // Если запись в Firebase не проходит (правила базы истекли/запрещают запись, база
+  // недоступна, нет сети), раньше экран молча застревал. Теперь показываем причину.
+  function showFirebaseError(err){
+    console.error('Firebase error', err);
+    document.getElementById('waitingLabel').textContent = 'Нет связи с базой данных';
+    document.getElementById('waitingSub').textContent =
+      ((err && (err.code || err.name)) || 'error') + ': ' + ((err && err.message) || String(err));
+  }
+  function watchWaitingProgress(){
+    setTimeout(() => {
+      const w = document.getElementById('waiting');
+      if (w.style.display === 'none') return; // игра уже началась
+      const sub = document.getElementById('waitingSub');
+      if (sub.textContent) return;
+      db.ref('.info/connected').once('value').then(s => {
+        sub.textContent = s.val() === true
+          ? 'База доступна, но раздача не запустилась (проверь правила записи Firebase)'
+          : 'Нет соединения с Firebase — проверь интернет/VPN';
+      });
+    }, 7000);
   }
 
   // Общий запуск партии с ботами — используется и "Играть с ботами", и этапами карьеры.
@@ -687,7 +710,8 @@
     document.getElementById('waitingSub').textContent = '';
     document.getElementById('roomCodeBox').style.display = 'none';
     showScreen('waiting');
-    roomRef.child('players').set(players).then(attachRoomListeners);
+    watchWaitingProgress();
+    roomRef.child('players').set(players).then(attachRoomListeners).catch(showFirebaseError);
   }
 
   document.getElementById('btnSolo').addEventListener('click', () => startBotsGame(null));
