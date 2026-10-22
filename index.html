@@ -24,7 +24,7 @@
     margin:0; height:100%; overflow:hidden;
     background:
       linear-gradient(rgba(0,0,0,0.06), rgba(0,0,0,0.12)),
-      url('assets/table-bg.jpg') center/cover no-repeat,
+      var(--table-image, url('assets/table-bg.jpg')) center/cover no-repeat,
       radial-gradient(ellipse at 50% 40%, var(--felt-light), var(--felt-dark) 75%);
     background-color:#1a120c;
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
@@ -155,7 +155,7 @@
   /* Экраны меню (главное, карьера, мультиплеер, коллекция, лидерборд и т.д.) — своя картинка.
      Экран ожидания (#waiting) и итог раздачи (#dealResult) остаются на зелёном сукне. */
   #menu, #careerScreen, #tutorialTips, #multiplayerScreen, #createRoomScreen,
-  #roomListScreen, #passwordScreen, #collectionScreen, #leaderboardScreen{
+  #roomListScreen, #passwordScreen, #settingsScreen, #leaderboardScreen{
     background:
       linear-gradient(rgba(0,0,0,0.30), rgba(0,0,0,0.50)),
       url('assets/menu-bg.jpg') center/cover no-repeat,
@@ -220,7 +220,8 @@
   .cosmetic-item.locked{ opacity:0.4; cursor:default; }
   .cosmetic-item.equipped{ border-color:var(--gold); box-shadow:0 0 0 1px var(--gold) inset; }
   .cosmetic-swatch{ width:34px; height:24px; border-radius:5px; border:1px solid rgba(0,0,0,0.4); flex:0 0 auto; }
-  .cosmetic-section-title{ font-size:12px; color:var(--gold); letter-spacing:.4px; margin:6px 0 -4px; align-self:flex-start; }
+  .cosmetic-swatch.table-thumb{ width:40px; height:72px; }
+  .cosmetic-item span{ font-size:14px; }
   .leaderboard-row{
     display:flex; align-items:center; gap:10px;
     background:rgba(0,0,0,0.28);
@@ -261,7 +262,7 @@
   <button class="menu-btn" id="btnCareer">Карьера</button>
   <button class="menu-btn" id="btnSolo">Играть с ботами</button>
   <button class="menu-btn" id="btnMultiplayer">Мультиплеер</button>
-  <button class="menu-btn" id="btnCollection">🎨 Коллекция</button>
+  <button class="menu-btn" id="btnSettings">⚙️ Настройки</button>
   <button class="menu-btn" id="btnLeaderboard">🏆 Лидерборд</button>
 </div>
 
@@ -307,10 +308,9 @@
   <div class="sub" id="passwordError" style="color:#d98a8a;"></div>
 </div>
 
-<div class="waiting" id="collectionScreen" style="display:none;">
-  <button class="menu-btn back-btn" id="btnBackFromCollection">‹ Назад</button>
-  <div class="dots" style="font-size:16px;">Коллекция</div>
-  <div id="collectionList" style="display:flex; flex-direction:column; gap:10px; width:280px; max-height:60vh; overflow-y:auto;"></div>
+<div class="waiting" id="settingsScreen" style="display:none;">
+  <button class="menu-btn back-btn" id="btnBackFromSettings">‹ Назад</button>
+  <div id="settingsList" style="display:flex; flex-direction:column; gap:10px; width:280px; max-height:72vh; overflow-y:auto;"></div>
 </div>
 
 <div class="waiting" id="leaderboardScreen" style="display:none;">
@@ -542,7 +542,7 @@
   }
 
   function showScreen(id){
-    ['menu', 'careerScreen', 'tutorialTips', 'multiplayerScreen', 'createRoomScreen', 'roomListScreen', 'passwordScreen', 'collectionScreen', 'leaderboardScreen', 'waiting'].forEach(s => {
+    ['menu', 'careerScreen', 'tutorialTips', 'multiplayerScreen', 'createRoomScreen', 'roomListScreen', 'passwordScreen', 'settingsScreen', 'leaderboardScreen', 'waiting'].forEach(s => {
       document.getElementById(s).style.display = (s === id) ? 'flex' : 'none';
     });
   }
@@ -590,7 +590,7 @@
     for (let stage = 1; stage <= CAREER_STAGES_COUNT; stage++) {
       const unlocked = stage <= careerProgressCache;
       const reward = CAREER_REWARDS[stage];
-      const alreadyOwned = reward ? cosmeticsCache.unlocked[reward.list].includes(reward.id) : true;
+      const alreadyOwned = reward ? (stage < careerProgressCache || cosmeticsCache.unlocked[reward.list].includes(reward.id)) : true;
       const rewardLabel = rewardLabelForStage(stage);
       const btn = document.createElement('button');
       btn.className = 'menu-btn';
@@ -1172,38 +1172,26 @@
   // ==================== Косметика: рубашки карт, темы стола, имена ботов ====================
   // Открывается прохождением этапов карьеры (см. CAREER_REWARDS). Хранится отдельно от
   // unlockedStage, так что владение косметикой сохраняется даже при переигровке этапов.
+  // Рубашки и имена ботов пока не меняются (только стандартные). Настраиваются только столы.
   const CARD_BACK_SKINS = [
-    { id:'default', label:'Классика',     css:"url('assets/card-back.jpg') center/cover no-repeat" },
-    { id:'emerald', label:'Изумруд',      css:'linear-gradient(135deg,#0f5132,#123d27)' },
-    { id:'fire',    label:'Огонь',        css:'linear-gradient(135deg,#7a1f1f,#3d0f0f)' },
-    { id:'royal',   label:'Королевский',  css:'linear-gradient(135deg,#3a1f5e,#20112f)' },
-    { id:'legend',  label:'Легенда',      css:'linear-gradient(135deg,#c9a13b,#7a5c1e)' }
+    { id:'default', label:'Классика',     css:"url('assets/card-back.jpg') center/cover no-repeat" }
   ];
+  // Столы: картинки лежат в assets/ рядом с table-bg.jpg. Стол открывается, когда пройден
+  // этап `stage` (0 = доступен сразу). Чтобы поменять этап — измени stage здесь и в CAREER_REWARDS.
   const TABLE_THEMES = [
-    { id:'default', label:'Стандарт', dark:'#173324', light:'#1f4632' },
-    { id:'night',   label:'Ночь',     dark:'#141b30', light:'#232f52' },
-    { id:'desert',  label:'Пустыня',  dark:'#4a3620', light:'#7a5c34' },
-    { id:'ice',     label:'Лёд',      dark:'#1a3b45', light:'#2e6577' }
+    { id:'default',      label:'Стандарт',         stage:0, img:'assets/table-bg.jpg' },
+    { id:'blue-marble',  label:'Синий мрамор',     stage:1, img:'assets/blue-marble.jpg' },
+    { id:'green-marble', label:'Зелёный мрамор',   stage:2, img:'assets/green-marble.jpg' },
+    { id:'purple-wood',  label:'Фиолетовое сукно', stage:3, img:'assets/purple-wood.jpg' }
   ];
   const BOT_NAME_PACKS = [
-    { id:'default', label:'Стандарт',   names:['Айдос','Динара','Ержан'] },
-    { id:'pack1',   label:'Аль-Фараби', names:['Айгерим','Нурлан','Сакен'] },
-    { id:'pack2',   label:'Дала',       names:['Гульмира','Ерлан','Ботагоз'] },
-    { id:'pack3',   label:'Легенда',    names:['Абай','Курмангазы','Жамбыл'] }
+    { id:'default', label:'Стандарт',   names:['Айдос','Динара','Ержан'] }
   ];
-  // Какой этап карьеры какую именно косметику открывает — чередуем 3 категории по кругу,
-  // финальный (10-й) этап отдельно даёт особую "легендарную" рубашку.
+  // Какой этап карьеры какой стол открывает.
   const CAREER_REWARDS = {
-    1: { list:'cardbacks', id:'emerald' },
-    2: { list:'tables',    id:'night' },
-    3: { list:'botnames',  id:'pack1' },
-    4: { list:'cardbacks', id:'fire' },
-    5: { list:'tables',    id:'desert' },
-    6: { list:'botnames',  id:'pack2' },
-    7: { list:'cardbacks', id:'royal' },
-    8: { list:'tables',    id:'ice' },
-    9: { list:'botnames',  id:'pack3' },
-    10:{ list:'cardbacks', id:'legend' }
+    1: { list:'tables', id:'blue-marble' },
+    2: { list:'tables', id:'green-marble' },
+    3: { list:'tables', id:'purple-wood' }
   };
   const COSMETIC_STORAGE_KEY = 'belka_cosmetics';
 
@@ -1242,8 +1230,7 @@
 
   function applyCosmetics(data){
     const theme = TABLE_THEMES.find(t => t.id === data.equipped.tables) || TABLE_THEMES[0];
-    document.documentElement.style.setProperty('--felt-dark', theme.dark);
-    document.documentElement.style.setProperty('--felt-light', theme.light);
+    document.documentElement.style.setProperty('--table-image', `url('${theme.img}')`);
     document.querySelectorAll('.back-card').forEach(applyCardBackStyle);
   }
 
@@ -1287,52 +1274,54 @@
     return rewardLabelForStage(stage);
   }
 
-  function renderCollectionScreen(){
-    const container = document.getElementById('collectionList');
-    container.innerHTML = '';
-
-    function section(title, list, key, swatchFn){
-      const h = document.createElement('div');
-      h.className = 'cosmetic-section-title';
-      h.textContent = title;
-      container.appendChild(h);
-      list.forEach(item => {
-        const unlocked = cosmeticsCache.unlocked[key].includes(item.id);
-        const equipped = cosmeticsCache.equipped[key] === item.id;
-        const row = document.createElement('div');
-        row.className = 'cosmetic-item' + (unlocked ? '' : ' locked') + (equipped ? ' equipped' : '');
-        const swatch = document.createElement('div');
-        swatch.className = 'cosmetic-swatch';
-        swatchFn(swatch, item);
-        const label = document.createElement('span');
-        label.textContent = (unlocked ? '' : '🔒 ') + item.label + (equipped ? ' ✓' : '');
-        row.appendChild(swatch);
-        row.appendChild(label);
-        if (unlocked) {
-          row.addEventListener('click', () => {
-            const data = {
-              unlocked: cosmeticsCache.unlocked,
-              equipped: Object.assign({}, cosmeticsCache.equipped, { [key]: item.id })
-            };
-            saveCosmetics(data);
-            applyCosmetics(data);
-            renderCollectionScreen();
-          });
-        }
-        container.appendChild(row);
-      });
-    }
-
-    section('Рубашки карт', CARD_BACK_SKINS, 'cardbacks', (sw, item) => { sw.style.background = item.css; });
-    section('Темы стола', TABLE_THEMES, 'tables', (sw, item) => { sw.style.background = `linear-gradient(135deg, ${item.light}, ${item.dark})`; });
-    section('Имена ботов', BOT_NAME_PACKS, 'botnames', (sw, item) => { sw.style.background = 'var(--gold-dim)'; });
+  // Вкладка «Настройки»: сразу список столов. Стол доступен, если пройден нужный этап карьеры
+  // (считаем по прогрессу карьеры, поэтому у тех, кто уже прошёл этапы, столы открыты сразу).
+  function isTableUnlocked(item){
+    return item.stage === 0 || careerProgressCache > item.stage;
   }
 
-  document.getElementById('btnCollection').addEventListener('click', () => {
-    showScreen('collectionScreen');
-    renderCollectionScreen();
+  function renderSettingsScreen(){
+    const container = document.getElementById('settingsList');
+    container.innerHTML = '';
+    TABLE_THEMES.forEach(item => {
+      const unlocked = isTableUnlocked(item);
+      const equipped = (cosmeticsCache.equipped.tables || 'default') === item.id;
+      const row = document.createElement('div');
+      row.className = 'cosmetic-item' + (unlocked ? '' : ' locked') + (equipped ? ' equipped' : '');
+      const swatch = document.createElement('div');
+      swatch.className = 'cosmetic-swatch table-thumb';
+      swatch.style.background = `url('${item.img}') center/cover no-repeat`;
+      const label = document.createElement('span');
+      label.style.whiteSpace = 'pre-line';
+      label.textContent = (unlocked ? '' : '🔒 ') + item.label + (equipped ? ' ✓' : '')
+        + (unlocked ? '' : `\nПройди этап ${item.stage} карьеры`);
+      row.appendChild(swatch);
+      row.appendChild(label);
+      if (unlocked) {
+        row.addEventListener('click', () => {
+          const data = {
+            unlocked: cosmeticsCache.unlocked,
+            equipped: Object.assign({}, cosmeticsCache.equipped, { tables: item.id })
+          };
+          saveCosmetics(data);
+          applyCosmetics(data);
+          renderSettingsScreen();
+        });
+      }
+      container.appendChild(row);
+    });
+  }
+
+  document.getElementById('btnSettings').addEventListener('click', () => {
+    showScreen('settingsScreen');
+    renderSettingsScreen();
+    // Прогресс карьеры может быть ещё не загружен — подтягиваем и перерисовываем.
+    loadCareerProgress().then(stage => {
+      careerProgressCache = stage;
+      renderSettingsScreen();
+    });
   });
-  document.getElementById('btnBackFromCollection').addEventListener('click', () => showScreen('menu'));
+  document.getElementById('btnBackFromSettings').addEventListener('click', () => showScreen('menu'));
 
   loadCosmetics().then(data => { cosmeticsCache = data; applyCosmetics(data); });
 
