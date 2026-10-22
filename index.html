@@ -831,7 +831,7 @@
         const p = players[seat];
         const labelEl = document.querySelector('#' + labelIds[i]).parentElement.querySelector('.opp-label');
         labelEl.textContent = p ? p.name : 'Ожидание…';
-        renderOpponentBacks(document.getElementById(labelIds[i]), p ? 8 : 0);
+        if (room.status !== 'dealt') renderOpponentBacks(document.getElementById(labelIds[i]), p ? 8 : 0);
       });
 
       // ВАЖНО: раньше здесь стояла проверка room.deal.hands[mySeat], но Firebase
@@ -1432,6 +1432,22 @@
       : chooseFollowCard(legal, deal, seat);
   }
 
+  // ---------------- Видимые ошибки (для отладки на телефоне) ----------------
+  function reportError(e){
+    console.error(e);
+    let bar = document.getElementById('errBar');
+    if (!bar) {
+      bar = document.createElement('div');
+      bar.id = 'errBar';
+      bar.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:9999;background:rgba(120,20,20,.92);color:#fff;font:11px/1.3 monospace;padding:4px 8px;max-height:20vh;overflow:auto;';
+      bar.addEventListener('click', () => bar.remove());
+      document.body.appendChild(bar);
+    }
+    bar.textContent = 'Ошибка: ' + ((e && (e.stack || e.message)) || String(e)).slice(0, 400) + ' (тап — скрыть)';
+  }
+  window.addEventListener('error', ev => reportError(ev.error || ev.message));
+  window.addEventListener('unhandledrejection', ev => reportError(ev.reason));
+
   // ==================== Защита от зависания (АФК/обрыв связи) ====================
   // Если ход слишком долго не делается (человек отвлёкся или потерял связь),
   // хост (место 0) через некоторое время ходит за него сам — одним ходом, не
@@ -1459,23 +1475,44 @@
   });
   window.addEventListener('pageshow', () => maybeClearStuckTrick(gameState));
 
+  // Игроки за столом (обновляется в syncDealState) — нужно, чтобы сторожок знал, чей ход: бота или человека.
+  let latestPlayers = {};
+  const BOT_STALE_MS = 3500; // бот обычно ходит за ~1 сек; если за 3.5 сек не сходил — подталкиваем
+  let botRetryStamp = null;
+  let botRetryCount = 0;
+
   function startTurnWatchdog(){
     if (turnWatchdogStarted) return;
     turnWatchdogStarted = true;
     setInterval(() => {
       // Эта проверка работает у любого игрока за столом (не только у хоста) —
       // так зависшая взятка убирается, даже если хост сам сейчас в фоне.
-      maybeClearStuckTrick(gameState);
+      try { maybeClearStuckTrick(gameState); } catch (e) { reportError(e); }
 
       if (mySeat !== 0 || !roomRef || !gameState) return;
       const deal = gameState;
       if (deal.status !== 'playing') return;
       if (deal.turn == null || !deal.turnStartedAt) return;
-      if (Date.now() - deal.turnStartedAt < TURN_TIMEOUT_MS) return;
       const seat = deal.turn;
-      const card = chooseBotCard(deal, seat);
-      if (card) playCard(seat, card);
-    }, 5000);
+      const p = latestPlayers[seat];
+      const limit = (p && p.bot) ? BOT_STALE_MS : TURN_TIMEOUT_MS;
+      if (Date.now() - deal.turnStartedAt < limit) return;
+      try {
+        // Если один и тот же ход уже пытались сделать и он не прошёл — меняем тактику
+        // на случайную легальную карту, чтобы одна "упрямая" карта не вешала игру навсегда.
+        const stamp = seat + ':' + (deal.trick ? deal.trick.length : 0) + ':' + deal.trickNum;
+        if (stamp === botRetryStamp) botRetryCount++; else { botRetryStamp = stamp; botRetryCount = 0; }
+        let card;
+        if (botRetryCount >= 1) {
+          const hand = (deal.hands && deal.hands[seat]) || [];
+          const legal = legalCardsForHand(hand, deal.ledGroup, deal.trumpSuit, deal.ledSuitsPlayed);
+          card = legal[Math.floor(Math.random() * legal.length)];
+        } else {
+          card = chooseBotCard(deal, seat);
+        }
+        if (card) playCard(seat, card);
+      } catch (e) { reportError(e); }
+    }, 1500);
   }
   startTurnWatchdog();
 
@@ -1483,10 +1520,17 @@
   function syncDealState(room, players){
     const deal = room.deal;
     gameState = deal;
+    latestPlayers = players;
 
     if (room.match) updateScoreUI(room);
     renderTrickArea();
     renderHand(sortHandForDisplay((deal.hands && deal.hands[mySeat]) || [], deal.trumpSuit));
+    // Количество карт у соперников — по реальным рукам (раньше всегда рисовалось 8).
+    ['oppLeft', 'oppTop', 'oppRight'].forEach((id, i) => {
+      const seat = (mySeat + i + 1) % 4;
+      const n = (deal.hands && deal.hands[seat] && deal.hands[seat].length) || 0;
+      renderOpponentBacks(document.getElementById(id), n);
+    });
 
     // Если взятка собрана (4 карты) и ждёт очистки — планируем её уборку со стола
     // с небольшой задержкой, чтобы все успели увидеть все 4 карты, включая последнюю.
@@ -1507,7 +1551,7 @@
       const stamp = deal.turn + ':' + (deal.trick ? deal.trick.length : 0) + ':' + deal.trickNum;
       if (dealVersionSeen !== stamp) {
         dealVersionSeen = stamp;
-        setTimeout(() => botPlay(deal), 600 + Math.random() * 500);
+        setTimeout(() => { try { botPlay(deal); } catch (e) { reportError(e); } }, 600 + Math.random() * 500);
       }
     }
   }
@@ -1612,7 +1656,7 @@
       }
 
       return deal;
-    });
+    }, (error) => { if (error) reportError(error); }, false);
   }
 
   // ---------------- Уборка взятки со стола после паузы на просмотр ----------------
