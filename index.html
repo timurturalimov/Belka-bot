@@ -152,6 +152,15 @@
       radial-gradient(ellipse at 50% 40%, var(--felt-light), var(--felt-dark) 75%);
     z-index:50;
   }
+  /* Экраны меню (главное, карьера, мультиплеер, коллекция, лидерборд и т.д.) — своя картинка.
+     Экран ожидания (#waiting) и итог раздачи (#dealResult) остаются на зелёном сукне. */
+  #menu, #careerScreen, #tutorialTips, #multiplayerScreen, #createRoomScreen,
+  #roomListScreen, #passwordScreen, #collectionScreen, #leaderboardScreen{
+    background:
+      linear-gradient(rgba(0,0,0,0.30), rgba(0,0,0,0.50)),
+      url('assets/menu-bg.jpg') center/cover no-repeat,
+      #1a120c;
+  }
   .waiting .dots{ font-size:15px; letter-spacing:.4px; color:var(--card-cream); }
   .waiting .count{ font-size:34px; font-weight:700; color:var(--gold); }
   .waiting .sub{ font-size:12px; color:rgba(244,236,216,0.5); }
@@ -159,7 +168,7 @@
     font-family:inherit;
     font-size:15px;
     color:var(--card-cream);
-    background:rgba(0,0,0,0.28);
+    background:rgba(10,8,6,0.62);
     border:1px solid var(--gold-dim);
     border-radius:12px;
     padding:14px 28px;
