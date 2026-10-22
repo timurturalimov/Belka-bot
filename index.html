@@ -1434,17 +1434,22 @@
   }
 
   // ---------------- Видимые ошибки (для отладки на телефоне) ----------------
-  function reportError(e){
+  function reportError(e, soft){
     console.error(e);
     let bar = document.getElementById('errBar');
     if (!bar) {
       bar = document.createElement('div');
       bar.id = 'errBar';
-      bar.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:9999;background:rgba(120,20,20,.92);color:#fff;font:11px/1.3 monospace;padding:4px 8px;max-height:20vh;overflow:auto;';
+      bar.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:9999;background:rgba(120,20,20,.92);color:#fff;font:11px/1.3 monospace;padding:4px 8px;max-height:14vh;overflow:auto;';
       bar.addEventListener('click', () => bar.remove());
       document.body.appendChild(bar);
     }
-    bar.textContent = 'Ошибка: ' + ((e && (e.stack || e.message)) || String(e)).slice(0, 400) + ' (тап — скрыть)';
+    const msg = (e && (e.name ? e.name + ': ' : '') + (e.message || '')) || String(e);
+    // из стека оставляем только строки нашего кода (index.html), без внутренностей Firebase
+    const mine = ((e && e.stack) || '').split('\n').filter(l => /index\.html|belka|vercel/i.test(l)).slice(0, 2).join(' | ');
+    bar.textContent = 'Ошибка: ' + msg.slice(0, 200) + (mine ? ' @ ' + mine.slice(0, 160) : '') + ' (тап — скрыть)';
+    clearTimeout(bar._t);
+    if (soft) bar._t = setTimeout(() => bar.remove(), 5000);
   }
   window.addEventListener('error', ev => reportError(ev.error || ev.message));
   window.addEventListener('unhandledrejection', ev => reportError(ev.reason));
@@ -1657,7 +1662,7 @@
       }
 
       return deal;
-    }, (error) => { if (error) reportError(error); }, false);
+    }, (error) => { if (error) reportError(new Error('ход ' + seat + ': ' + (error.message || error)), true); });
   }
 
   // ---------------- Уборка взятки со стола после паузы на просмотр ----------------
