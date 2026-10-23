@@ -161,6 +161,13 @@
       url('assets/menu-bg.jpg') center/cover no-repeat,
       #1a120c;
   }
+  /* Итог раздачи — фон выбранного стола (затемнён, чтобы текст читался). */
+  #dealResult{
+    background:
+      linear-gradient(rgba(0,0,0,0.45), rgba(0,0,0,0.6)),
+      var(--table-image, url('assets/table-bg.jpg')) center/cover no-repeat,
+      #1a120c;
+  }
   .waiting .dots{ font-size:15px; letter-spacing:.4px; color:var(--card-cream); }
   .waiting .count{ font-size:34px; font-weight:700; color:var(--gold); }
   .waiting .sub{ font-size:12px; color:rgba(244,236,216,0.5); }
