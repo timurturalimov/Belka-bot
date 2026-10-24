@@ -228,6 +228,13 @@
   .cosmetic-item.equipped{ border-color:var(--gold); box-shadow:0 0 0 1px var(--gold) inset; }
   .cosmetic-swatch{ width:34px; height:24px; border-radius:5px; border:1px solid rgba(0,0,0,0.4); flex:0 0 auto; }
   .cosmetic-swatch.table-thumb{ width:40px; height:72px; }
+  .buy-btn{
+    margin-left:auto; flex:0 0 auto;
+    font-family:inherit; font-size:13px; font-weight:600;
+    color:var(--gold); background:rgba(0,0,0,0.35);
+    border:1px solid var(--gold); border-radius:999px;
+    padding:6px 12px; cursor:pointer;
+  }
   .cosmetic-item span{ font-size:14px; }
   .leaderboard-row{
     display:flex; align-items:center; gap:10px;
@@ -1193,7 +1200,10 @@
     { id:'courtyard',    label:'Двор',             stage:4, img:'assets/courtyard.jpg' },
     { id:'gazebo',       label:'Беседка',          stage:5, img:'assets/gazebo.jpg' },
     { id:'train',        label:'Поезд',            stage:6, img:'assets/train.jpg' },
-    { id:'carpet',       label:'Ковёр',            stage:7, img:'assets/carpet.jpg' }
+    { id:'carpet',       label:'Ковёр',            stage:7, img:'assets/carpet.jpg' },
+    { id:'astana',       label:'Астана',           stage:8, img:'assets/astana.jpg' },
+    { id:'beach',        label:'Пляж',             stage:9, img:'assets/beach.jpg' },
+    { id:'yurt',         label:'Юрта',             stage:10, img:'assets/yurt.jpg' }
   ];
   const BOT_NAME_PACKS = [
     { id:'default', label:'Стандарт',   names:['Айдос','Динара','Ержан'] }
@@ -1206,7 +1216,10 @@
     4: { list:'tables', id:'courtyard' },
     5: { list:'tables', id:'gazebo' },
     6: { list:'tables', id:'train' },
-    7: { list:'tables', id:'carpet' }
+    7: { list:'tables', id:'carpet' },
+    8: { list:'tables', id:'astana' },
+    9: { list:'tables', id:'beach' },
+    10:{ list:'tables', id:'yurt' }
   };
   const COSMETIC_STORAGE_KEY = 'belka_cosmetics';
 
@@ -1290,14 +1303,67 @@
   }
 
   // Вкладка «Настройки»: сразу список столов. Стол доступен, если пройден нужный этап карьеры
-  // (считаем по прогрессу карьеры, поэтому у тех, кто уже прошёл этапы, столы открыты сразу).
+  // либо куплен за Telegram Stars (покупки хранятся в Firebase: purchases/<id>, пишет webhook бота).
+  const TABLE_PRICE_STARS = 50;
+  const ALL_TABLES_PRICE_STARS = 300;   // цены должны совпадать с lib/tablesCatalog.js на сервере
+  let purchasedTables = {};             // { all:true, courtyard:true, ... }
+
+  function loadPurchases(){
+    if (!tgUser) return Promise.resolve({});
+    return db.ref('purchases/' + myId).once('value').then(snap => snap.val() || {}).catch(() => ({}));
+  }
+
   function isTableUnlocked(item){
-    return item.stage === 0 || careerProgressCache > item.stage;
+    return item.stage === 0
+      || careerProgressCache > item.stage
+      || cosmeticsCache.unlocked.tables.includes(item.id)
+      || !!purchasedTables.all
+      || !!purchasedTables[item.id];
+  }
+
+  function buyTable(tableId){
+    if (!tg || !tg.openInvoice) return;
+    const fail = () => { const m = 'Не удалось открыть оплату. Попробуй позже.'; tg.showAlert ? tg.showAlert(m) : alert(m); };
+    fetch('/api/invoice', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ initData: tg.initData, tableId })
+    })
+      .then(r => r.json())
+      .then(res => {
+        if (!res.link) throw new Error(res.error || 'no link');
+        tg.openInvoice(res.link, status => {
+          if (status === 'paid') {
+            purchasedTables[tableId] = true;      // сразу открываем, не ждём webhook
+            renderSettingsScreen();
+            confirmPurchase(0);
+          }
+        });
+      })
+      .catch(fail);
+  }
+
+  // Webhook записывает покупку с небольшой задержкой — подтягиваем её из Firebase.
+  function confirmPurchase(attempt){
+    setTimeout(() => loadPurchases().then(p => {
+      if (Object.keys(p).length) { Object.assign(purchasedTables, p); renderSettingsScreen(); }
+      else if (attempt < 5) confirmPurchase(attempt + 1);
+    }), 1500);
   }
 
   function renderSettingsScreen(){
     const container = document.getElementById('settingsList');
     container.innerHTML = '';
+
+    if (tgUser && TABLE_THEMES.some(t => !isTableUnlocked(t))) {
+      const all = document.createElement('button');
+      all.className = 'menu-btn';
+      all.style.width = '100%';
+      all.textContent = `⭐ Открыть все столы — ${ALL_TABLES_PRICE_STARS}`;
+      all.addEventListener('click', () => buyTable('all'));
+      container.appendChild(all);
+    }
+
     TABLE_THEMES.forEach(item => {
       const unlocked = isTableUnlocked(item);
       const equipped = (cosmeticsCache.equipped.tables || 'default') === item.id;
@@ -1322,6 +1388,15 @@
           applyCosmetics(data);
           renderSettingsScreen();
         });
+      } else if (tgUser) {
+        row.style.opacity = '1';
+        swatch.style.opacity = '0.4';
+        label.style.opacity = '0.6';
+        const buy = document.createElement('button');
+        buy.className = 'buy-btn';
+        buy.textContent = `⭐ ${TABLE_PRICE_STARS}`;
+        buy.addEventListener('click', e => { e.stopPropagation(); buyTable(item.id); });
+        row.appendChild(buy);
       }
       container.appendChild(row);
     });
@@ -1330,9 +1405,10 @@
   document.getElementById('btnSettings').addEventListener('click', () => {
     showScreen('settingsScreen');
     renderSettingsScreen();
-    // Прогресс карьеры может быть ещё не загружен — подтягиваем и перерисовываем.
-    loadCareerProgress().then(stage => {
+    // Прогресс карьеры и покупки могут быть ещё не загружены — подтягиваем и перерисовываем.
+    Promise.all([loadCareerProgress(), loadPurchases()]).then(([stage, purchases]) => {
       careerProgressCache = stage;
+      purchasedTables = purchases;
       renderSettingsScreen();
     });
   });
