@@ -153,7 +153,7 @@
     z-index:50;
   }
   /* Экраны меню (главное, карьера, мультиплеер, коллекция, лидерборд и т.д.) — своя картинка.
-     Экран ожидания (#waiting) и итог раздачи (#dealResult) остаются на зелёном сукне. */
+     Экран ожидания (#waiting) и итог раздачи (#dealResult) идут на фоне выбранного стола. */
   #menu, #careerScreen, #tutorialTips, #multiplayerScreen, #createRoomScreen,
   #roomListScreen, #passwordScreen, #settingsScreen, #leaderboardScreen{
     background:
@@ -161,8 +161,8 @@
       url('assets/menu-bg.jpg') center/cover no-repeat,
       #1a120c;
   }
-  /* Итог раздачи — фон выбранного стола (затемнён, чтобы текст читался). */
-  #dealResult{
+  /* Ожидание игроков и итог раздачи — фон выбранного стола (затемнён, чтобы текст читался). */
+  #waiting, #dealResult{
     background:
       linear-gradient(rgba(0,0,0,0.45), rgba(0,0,0,0.6)),
       var(--table-image, url('assets/table-bg.jpg')) center/cover no-repeat,
