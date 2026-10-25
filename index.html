@@ -43,7 +43,7 @@
   }
   .trump{
     display:flex; align-items:center; gap:8px;
-    background:rgba(0,0,0,0.25);
+    background:rgba(0,0,0,0.55);
     border:1px solid var(--gold-dim);
     border-radius:999px;
     padding:6px 14px;
@@ -53,12 +53,12 @@
   .score{
     display:flex; gap:14px;
     font-size:13px;
-    background:rgba(0,0,0,0.25);
+    background:rgba(0,0,0,0.55);
     border-radius:999px;
     padding:6px 16px;
     border:1px solid rgba(201,161,59,0.3);
   }
-  .score span.num{color:var(--gold); font-weight:600; margin-left:4px;}
+  .score span.num{color:#fff; font-weight:700; margin-left:4px; text-shadow:0 1px 2px rgba(0,0,0,.8);}
   .opponents{
     display:flex; justify-content:space-between;
     padding:0 8px;
@@ -82,8 +82,10 @@
   }
   .back-card:first-child{margin-left:0;}
   .opp-label{
-    text-align:center; font-size:10px; color:var(--gold);
-    margin-top:3px; opacity:.85;
+    text-align:center; font-size:11px; font-weight:600; color:#fff;
+    margin-top:4px; padding:2px 9px;
+    background:rgba(0,0,0,0.55); border-radius:999px;
+    text-shadow:0 1px 2px rgba(0,0,0,.8);
     white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%;
   }
   .trick{
@@ -351,7 +353,7 @@
     <div class="score">Мы<span class="num" id="scoreUs">0</span> · Они<span class="num" id="scoreThem">0</span></div>
   </div>
   <div class="topbar" style="padding-top:0;">
-    <div class="score" style="font-size:11px; opacity:0.8;">Партия — глаза (до 12): Мы<span class="num" id="eyesUs">0</span> · Они<span class="num" id="eyesThem">0</span></div>
+    <div class="score" style="font-size:11px;">Партия — глаза (до 12): Мы<span class="num" id="eyesUs">0</span> · Они<span class="num" id="eyesThem">0</span></div>
   </div>
 
   <div class="opponents">
@@ -727,9 +729,9 @@
     const botNames = currentBotNames();
     const players = {
       0: { id: myId, name: myName },
-      1: { id: 'bot_1', name: 'Бот ' + botNames[0], bot: true },
-      2: { id: 'bot_2', name: 'Бот ' + botNames[1], bot: true },
-      3: { id: 'bot_3', name: 'Бот ' + botNames[2], bot: true }
+      1: { id: 'bot_1', name: botNames[0], bot: true },
+      2: { id: 'bot_2', name: botNames[1], bot: true },
+      3: { id: 'bot_3', name: botNames[2], bot: true }
     };
     document.getElementById('waitingLabel').textContent = 'Сажаем ботов за стол…';
     document.getElementById('waitingSub').textContent = '';
